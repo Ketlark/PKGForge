@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-amd64
+            runner: windows-latest
+            platform: windows/amd64
+            package: win
+          - name: macos-universal
+            runner: macos-latest
+            platform: darwin/universal
+            package: mac
+          - name: linux-amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+            package: linux
+            linux_arch: amd64
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            package: linux
+            linux_arch: arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Add Go bin to PATH
+        shell: bash
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install Linux build dependencies
+        if: matrix.package == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: npm ci (frontend)
+        working-directory: frontend
+        run: npm ci
+
+      - name: wails build
+        run: wails build -platform ${{ matrix.platform }} -clean
+
+      - name: Package (Windows)
+        if: matrix.package == 'win'
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          OUT="PKGForge_${TAG}_windows_amd64.zip"
+          tar.exe -a -c -f "$OUT" -C build/bin pkg-forge.exe
+          echo "PACKAGED=$OUT" >> "$GITHUB_ENV"
+
+      - name: Package (macOS)
+        if: matrix.package == 'mac'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          APP=$(find build/bin -maxdepth 1 -name "*.app" | head -1)
+          if [ -z "$APP" ]; then echo "No .app in build/bin"; ls -la build/bin; exit 1; fi
+          OUT="PKGForge_${TAG}_macos_universal.zip"
+          ditto -c -k --keepParent "$APP" "$OUT"
+          echo "PACKAGED=$OUT" >> "$GITHUB_ENV"
+
+      - name: Package (Linux)
+        if: matrix.package == 'linux'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          OUT="PKGForge_${TAG}_linux_${{ matrix.linux_arch }}.tar.gz"
+          tar -C build/bin -czvf "$OUT" pkg-forge
+          echo "PACKAGED=$OUT" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.PACKAGED }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: |
+          ls -la
+          sha256sum PKGForge_* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          files: |
+            dist/PKGForge_*
+            dist/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

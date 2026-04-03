@@ -80,6 +80,21 @@ go test ./core/ -v
 
 ---
 
+## CI/CD and releases
+
+GitHub Actions run on every push / PR to `main` (or `master`): Go tests under `core/`, frontend `npm run build`, and `svelte-check`.
+
+**Automatic releases:** push an annotated tag matching `v*` (for example `v1.0.0`). The [Release workflow](.github/workflows/release.yml) builds **Windows (amd64)**, **macOS (universal Intel + Apple Silicon)**, **Linux (amd64 + arm64)**, uploads archives to a **GitHub Release**, and attaches **SHA256SUMS.txt**.
+
+```bash
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+The Linux **arm64** job uses the hosted runner `ubuntu-24.04-arm` (available for **public** repositories on GitHub). For a private repo, remove or adjust that matrix entry if the runner is unavailable.
+
+---
+
 ## Project layout
 
 ```
