@@ -13,11 +13,11 @@
     RenamePKG,
   } from '../../../wailsjs/go/main/App';
   import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime';
-  import type { core } from '../../../wailsjs/go/models';
+  import type { PKGInfo, ChecksumResult } from '../types';
 
-  let info: core.PKGInfo | null = null;
+  let info: PKGInfo | null = null;
   let filePath = '';
-  let checksum: core.ChecksumResult | null = null;
+  let checksum: ChecksumResult | null = null;
   let checksumRunning = false;
   let checksumProgress = 0;
   let suggestedName = '';

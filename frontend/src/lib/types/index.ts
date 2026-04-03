@@ -23,6 +23,26 @@ export interface FileEntry {
   size: number;
 }
 
+/** Mirrors core.PKGInfo JSON from Wails (do not import gitignored wailsjs/go/models.ts in CI). */
+export interface PKGInfo {
+  contentId: string;
+  titleId: string;
+  region: string;
+  contentType: string;
+  drmType: string;
+  fileSize: number;
+  pkgSize: number;
+  valid: boolean;
+  error?: string;
+}
+
+/** Mirrors core.ChecksumResult JSON from Wails. */
+export interface ChecksumResult {
+  sha256: string;
+  size: number;
+  duration: number;
+}
+
 export interface LogEntry {
   id: number;
   timestamp: Date;
