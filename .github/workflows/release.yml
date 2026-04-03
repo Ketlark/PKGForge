@@ -100,7 +100,7 @@ jobs:
           echo "PACKAGED=$OUT" >> "$GITHUB_ENV"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}
           path: ${{ env.PACKAGED }}
