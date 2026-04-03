@@ -28,13 +28,14 @@
     suggestedName = '';
     checksumProgress = 0;
 
-    info = await InspectPKG(path);
-    if (info.valid) {
-      addLog('info', `Inspected: ${info.contentId || path.split('/').pop()}`);
+    const pkg = await InspectPKG(path);
+    info = pkg;
+    if (pkg.valid) {
+      addLog('info', `Inspected: ${pkg.contentId || path.split('/').pop()}`);
       const suggestion = await SuggestRenamePKG(path);
       suggestedName = suggestion.newName;
     } else {
-      addLog('warning', `Invalid PKG: ${info.error}`);
+      addLog('warning', `Invalid PKG: ${pkg.error}`);
     }
   }
 
@@ -57,8 +58,9 @@
     });
 
     try {
-      checksum = await CalculateChecksum(filePath);
-      addLog('success', `SHA-256: ${checksum.sha256.substring(0, 16)}...`);
+      const result = await CalculateChecksum(filePath);
+      checksum = result;
+      addLog('success', `SHA-256: ${result.sha256.substring(0, 16)}...`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg !== 'cancelled') addLog('error', `Checksum failed: ${msg}`);
