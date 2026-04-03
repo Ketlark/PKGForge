@@ -1,0 +1,13 @@
+build/bin/
+frontend/node_modules/
+frontend/dist/
+frontend/wailsjs/go/models.ts
+pkg-merger
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.log
+.idea/
+.vscode/
