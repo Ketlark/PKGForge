@@ -22,7 +22,7 @@ export async function addFilesForMerge(paths: string[]) {
   const detection = await DetectParts(firstPath);
 
   const entries: FileEntry[] = await Promise.all(
-    detection.parts.map(async (p) => {
+    detection.parts.map(async (p: string) => {
       const info = await GetFileInfo(p);
       return { path: p, name: info.name, size: info.size };
     })

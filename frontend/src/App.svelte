@@ -21,13 +21,17 @@
     { id: 'settings' as Tab, label: $t('tab.settings'), icon: '⚙️', shortcut: '5' },
   ];
 
-  onMount(async () => {
-    try {
-      const cfg = await LoadConfig();
-      if (cfg.language === 'fr' || cfg.language === 'en') {
-        locale.set(cfg.language as Locale);
+  onMount(() => {
+    void (async () => {
+      try {
+        const cfg = await LoadConfig();
+        if (cfg.language === 'fr' || cfg.language === 'en') {
+          locale.set(cfg.language as Locale);
+        }
+      } catch {
+        /* keep default locale */
       }
-    } catch {}
+    })();
 
     function handleKeydown(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey) {
