@@ -26,6 +26,9 @@ jobs:
           cache-dependency-path: go.sum
 
       # Only core/: main.go embeds frontend/dist and would fail without a Vite build.
+      - name: go vet (core)
+        run: go vet ./core/...
+
       - name: go test (core)
         run: go test ./core/... -count=1 -race -timeout=2m
 

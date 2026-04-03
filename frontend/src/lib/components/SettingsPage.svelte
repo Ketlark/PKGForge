@@ -15,23 +15,25 @@
   let formatOptions: string[] = [];
   let loaded = false;
 
-  onMount(async () => {
-    const [bufs, chunks, fmts, cfg] = await Promise.all([
-      BufferLabels(),
-      ChunkLabels(),
-      SplitFormatLabels(),
-      LoadConfig(),
-    ]);
-    bufferOptions = bufs;
-    chunkOptions = chunks;
-    formatOptions = fmts;
+  onMount(() => {
+    void (async () => {
+      const [bufs, chunks, fmts, cfg] = await Promise.all([
+        BufferLabels(),
+        ChunkLabels(),
+        SplitFormatLabels(),
+        LoadConfig(),
+      ]);
+      bufferOptions = bufs;
+      chunkOptions = chunks;
+      formatOptions = fmts;
 
-    bufferLabel = cfg.defaultBufferLabel || '64 MB';
-    chunkLabel = cfg.defaultChunkLabel || '4 GB';
-    splitFormat = cfg.defaultSplitFormat || '_NNN.pkgpart';
-    language = (cfg.language as Locale) || 'en';
-    locale.set(language);
-    loaded = true;
+      bufferLabel = cfg.defaultBufferLabel || '64 MB';
+      chunkLabel = cfg.defaultChunkLabel || '4 GB';
+      splitFormat = cfg.defaultSplitFormat || '_NNN.pkgpart';
+      language = (cfg.language as Locale) || 'en';
+      locale.set(language);
+      loaded = true;
+    })();
   });
 
   async function handleSave() {

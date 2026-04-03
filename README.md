@@ -82,7 +82,7 @@ go test ./core/ -v
 
 ## CI/CD and releases
 
-GitHub Actions run on every push / PR to `main` (or `master`): Go tests under `core/`, frontend `npm run build`, and `svelte-check`.
+GitHub Actions run on every push / PR to `main` (or `master`): `go vet` and `go test` under `core/`, frontend `npm ci`, `npm run build`, and `svelte-check`.
 
 **Automatic releases:** push an annotated tag matching `v*` (for example `v1.0.0`). The [Release workflow](.github/workflows/release.yml) builds **Windows (amd64)**, **macOS (universal Intel + Apple Silicon)**, **Linux (amd64 + arm64)**, uploads archives to a **GitHub Release**, and attaches **SHA256SUMS.txt**.
 
