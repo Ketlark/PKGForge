@@ -84,9 +84,26 @@ go test ./core/ -v
 
 GitHub Actions run on every push / PR to `main` (or `master`): `go vet` and `go test` under `core/`, frontend `npm ci`, `npm run build`, and `svelte-check`.
 
-**Automatic releases:** push an annotated tag matching `v*` (for example `v1.0.0`). The [Release workflow](.github/workflows/release.yml) builds **Windows (amd64)**, **macOS (universal Intel + Apple Silicon)**, **Linux (amd64 + arm64)**, uploads archives to a **GitHub Release**, and attaches **SHA256SUMS.txt**.
+**Automatic releases:** push an annotated tag matching `v*` (for example `v1.0.0`). The [Release workflow](.github/workflows/release.yml) builds **Windows (amd64)**, **macOS (universal Intel + Apple Silicon)**, **Linux (amd64 + arm64)** and publishes a **GitHub Release** with **direct download assets** (no nested zip/tar for Windows and Linux):
+
+| Asset | Contents |
+|-------|----------|
+| `pkg-forge-windows-amd64.exe` | Windows executable |
+| `pkg-forge-linux-amd64` | Linux x86_64 binary (chmod +x after download) |
+| `pkg-forge-linux-arm64` | Linux ARM64 binary |
+| `pkg-forge-macos-universal.zip` | macOS `.app` bundle (zip required for the app folder) |
+| `SHA256SUMS.txt` | Checksums for the above files |
 
 ```bash
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+**Replace an existing release** (same version, new binaries): delete the release on GitHub, remove the tag locally and on the remote, then tag and push again:
+
+```bash
+git tag -d v1.0.0
+git push origin :refs/tags/v1.0.0
 git tag -a v1.0.0 -m "Release v1.0.0"
 git push origin v1.0.0
 ```

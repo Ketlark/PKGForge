@@ -69,34 +69,28 @@ jobs:
       - name: wails build
         run: wails build -platform ${{ matrix.platform }} -clean
 
-      - name: Package (Windows)
+      # Direct downloadable assets (no extra zip/tar for Win/Linux; macOS stays .zip for .app bundle)
+      - name: Prepare artifact (Windows)
         if: matrix.package == 'win'
         shell: bash
-        env:
-          TAG: ${{ github.ref_name }}
         run: |
-          OUT="PKGForge_${TAG}_windows_amd64.zip"
-          tar.exe -a -c -f "$OUT" -C build/bin pkg-forge.exe
-          echo "PACKAGED=$OUT" >> "$GITHUB_ENV"
+          cp build/bin/pkg-forge.exe pkg-forge-windows-amd64.exe
+          echo "PACKAGED=pkg-forge-windows-amd64.exe" >> "$GITHUB_ENV"
 
-      - name: Package (macOS)
+      - name: Prepare artifact (macOS)
         if: matrix.package == 'mac'
-        env:
-          TAG: ${{ github.ref_name }}
         run: |
           APP=$(find build/bin -maxdepth 1 -name "*.app" | head -1)
           if [ -z "$APP" ]; then echo "No .app in build/bin"; ls -la build/bin; exit 1; fi
-          OUT="PKGForge_${TAG}_macos_universal.zip"
-          ditto -c -k --keepParent "$APP" "$OUT"
-          echo "PACKAGED=$OUT" >> "$GITHUB_ENV"
+          ditto -c -k --keepParent "$APP" pkg-forge-macos-universal.zip
+          echo "PACKAGED=pkg-forge-macos-universal.zip" >> "$GITHUB_ENV"
 
-      - name: Package (Linux)
+      - name: Prepare artifact (Linux)
         if: matrix.package == 'linux'
-        env:
-          TAG: ${{ github.ref_name }}
         run: |
-          OUT="PKGForge_${TAG}_linux_${{ matrix.linux_arch }}.tar.gz"
-          tar -C build/bin -czvf "$OUT" pkg-forge
+          OUT="pkg-forge-linux-${{ matrix.linux_arch }}"
+          cp build/bin/pkg-forge "$OUT"
+          chmod +x "$OUT"
           echo "PACKAGED=$OUT" >> "$GITHUB_ENV"
 
       - name: Upload artifact
@@ -121,7 +115,7 @@ jobs:
         working-directory: dist
         run: |
           ls -la
-          sha256sum PKGForge_* > SHA256SUMS.txt
+          sha256sum pkg-forge-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create GitHub Release
@@ -129,8 +123,9 @@ jobs:
         with:
           draft: false
           generate_release_notes: true
+          # Default overwrite_files=true replaces assets with the same name on re-run
           files: |
-            dist/PKGForge_*
+            dist/pkg-forge-*
             dist/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
