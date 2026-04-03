@@ -3,6 +3,7 @@
 [![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Wails](https://img.shields.io/badge/Wails-v2-ff3e00?style=flat)](https://wails.io/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **PKG Forge** is a cross-platform desktop application for **merging** and **splitting** PlayStation 4 and PlayStation 5 `.pkg` archives, with helpers for inspection, integrity checks, and safe renaming. The UI is built with **Svelte**; the backend is **Go**. Distribution is a **single native binary** (or app bundle on macOS) via [Wails](https://wails.io/).
 
@@ -123,6 +124,12 @@ This tool is intended for **legitimate** uses such as managing backups or archiv
 ## Contributing
 
 Issues and pull requests are welcome. Please run `go test ./core/ -v` before submitting changes, and match existing code style in both Go and Svelte.
+
+---
+
+## License
+
+[MIT](LICENSE) © Ketlark.
 
 ---
 
