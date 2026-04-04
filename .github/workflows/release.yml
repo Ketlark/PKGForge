@@ -61,6 +61,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+          # Wails CGO asks pkg-config for webkit2gtk-4.0; Ubuntu 24.04+ only ships 4.1 (.pc).
+          for d in /usr/lib/x86_64-linux-gnu/pkgconfig /usr/lib/aarch64-linux-gnu/pkgconfig; do
+            if [ -f "$d/webkit2gtk-4.1.pc" ] && [ ! -e "$d/webkit2gtk-4.0.pc" ]; then
+              sudo ln -sf webkit2gtk-4.1.pc "$d/webkit2gtk-4.0.pc"
+            fi
+          done
 
       - name: npm ci (frontend)
         working-directory: frontend
