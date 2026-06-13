@@ -30,6 +30,26 @@ export function ClearHistory() {
   return window['go']['main']['App']['ClearHistory']();
 }
 
+export function CreatePS1FPKG(arg1) {
+  return window['go']['main']['App']['CreatePS1FPKG'](arg1);
+}
+
+export function CreatePS2FPKG(arg1) {
+  return window['go']['main']['App']['CreatePS2FPKG'](arg1);
+}
+
+export function DetectDiscType(arg1) {
+  return window['go']['main']['App']['DetectDiscType'](arg1);
+}
+
+export function DetectPS1Disc(arg1) {
+  return window['go']['main']['App']['DetectPS1Disc'](arg1);
+}
+
+export function DetectPS2Disc(arg1) {
+  return window['go']['main']['App']['DetectPS2Disc'](arg1);
+}
+
 export function DetectParts(arg1) {
   return window['go']['main']['App']['DetectParts'](arg1);
 }
@@ -58,8 +78,16 @@ export function MergeFiles(arg1, arg2, arg3) {
   return window['go']['main']['App']['MergeFiles'](arg1, arg2, arg3);
 }
 
+export function OpenCUEFileDialog() {
+  return window['go']['main']['App']['OpenCUEFileDialog']();
+}
+
 export function OpenDirectoryDialog() {
   return window['go']['main']['App']['OpenDirectoryDialog']();
+}
+
+export function OpenEmulatorDirDialog() {
+  return window['go']['main']['App']['OpenEmulatorDirDialog']();
 }
 
 export function OpenFileDialog() {
@@ -70,12 +98,24 @@ export function OpenFilesDialog() {
   return window['go']['main']['App']['OpenFilesDialog']();
 }
 
+export function OpenISOFileDialog() {
+  return window['go']['main']['App']['OpenISOFileDialog']();
+}
+
+export function OpenImageFileDialog(arg1) {
+  return window['go']['main']['App']['OpenImageFileDialog'](arg1);
+}
+
 export function RenamePKG(arg1) {
   return window['go']['main']['App']['RenamePKG'](arg1);
 }
 
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
+}
+
+export function SavePKGFileDialog(arg1) {
+  return window['go']['main']['App']['SavePKGFileDialog'](arg1);
 }
 
 export function SplitFile(arg1, arg2, arg3, arg4, arg5) {

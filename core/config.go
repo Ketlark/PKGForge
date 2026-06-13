@@ -13,6 +13,7 @@ type Config struct {
 	DefaultSplitFormat string `json:"defaultSplitFormat"`
 	DefaultOutputDir   string `json:"defaultOutputDir"`
 	Language           string `json:"language"`
+	EmulatorFilesDir   string `json:"emulatorFilesDir"`
 }
 
 // DefaultConfig returns sensible defaults.

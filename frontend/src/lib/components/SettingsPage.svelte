@@ -3,12 +3,13 @@
   import { t, locale } from '../stores/i18n';
   import type { Locale } from '../stores/i18n';
   import { addLog } from '../stores/activity';
-  import { LoadConfig, SaveConfig, BufferLabels, ChunkLabels, SplitFormatLabels } from '../../../wailsjs/go/main/App';
+  import { LoadConfig, SaveConfig, BufferLabels, ChunkLabels, SplitFormatLabels, OpenEmulatorDirDialog } from '../../../wailsjs/go/main/App';
 
   let bufferLabel = '64 MB';
   let chunkLabel = '4 GB';
   let splitFormat = '_NNN.pkgpart';
   let language: Locale = 'en';
+  let emulatorFilesDir = '';
 
   let bufferOptions: string[] = [];
   let chunkOptions: string[] = [];
@@ -31,10 +32,20 @@
       chunkLabel = cfg.defaultChunkLabel || '4 GB';
       splitFormat = cfg.defaultSplitFormat || '_NNN.pkgpart';
       language = (cfg.language as Locale) || 'en';
+      emulatorFilesDir = cfg.emulatorFilesDir || '';
       locale.set(language);
       loaded = true;
     })();
   });
+
+  async function browseEmulatorDir() {
+    const path = await OpenEmulatorDirDialog();
+    if (path) emulatorFilesDir = path;
+  }
+
+  function clearEmulatorDir() {
+    emulatorFilesDir = '';
+  }
 
   async function handleSave() {
     locale.set(language);
@@ -44,6 +55,7 @@
       defaultSplitFormat: splitFormat,
       defaultOutputDir: '',
       language,
+      emulatorFilesDir,
     });
     addLog('success', $t('settings.saved'));
   }
@@ -61,6 +73,32 @@
           <option value="fr">Français</option>
         </select>
       </div>
+    </div>
+
+    <div class="section">
+      <h3>{$t('settings.emulator')}</h3>
+
+      {#if emulatorFilesDir}
+        <p class="hint">{$t('settings.emulatorDirOverride')}</p>
+        <div class="form-grid">
+          <label class="form-label" for="settings-emudir">{$t('settings.emulatorDir')}</label>
+          <div class="path-field">
+            <input
+              id="settings-emudir"
+              type="text"
+              class="form-select"
+              bind:value={emulatorFilesDir}
+              placeholder={$t('settings.emulatorDirPlaceholder')}
+              readonly
+            />
+            <button class="btn-browse" on:click={browseEmulatorDir}>{$t('settings.browse')}</button>
+          </div>
+        </div>
+      {:else}
+        <p class="hint">{$t('settings.emulatorAutoDownload')}</p>
+      {/if}
+
+      <button class="btn-browse" on:click={clearEmulatorDir}>{$t('settings.emulatorReset')}</button>
     </div>
 
     <div class="section">
@@ -153,5 +191,45 @@
   .actions {
     display: flex;
     justify-content: flex-end;
+  }
+
+  .path-field {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .path-field input {
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .btn-browse {
+    font-size: 12px;
+    padding: 7px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.15s;
+  }
+
+  .btn-browse:hover {
+    border-color: var(--accent);
+  }
+
+  .hint {
+    margin: 4px 0 0;
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.7;
+  }
+
+  .hint.warning {
+    color: var(--warning, #e6a23c);
+    opacity: 1;
   }
 </style>

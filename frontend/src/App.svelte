@@ -3,6 +3,8 @@
   import MergePage from './lib/components/MergePage.svelte';
   import SplitPage from './lib/components/SplitPage.svelte';
   import InspectPage from './lib/components/InspectPage.svelte';
+  import PS1Page from './lib/components/PS1Page.svelte';
+  import PS2Page from './lib/components/PS2Page.svelte';
   import ActivityLog from './lib/components/ActivityLog.svelte';
   import SettingsPage from './lib/components/SettingsPage.svelte';
   import { logCount } from './lib/stores/activity';
@@ -10,15 +12,17 @@
   import type { Locale } from './lib/stores/i18n';
   import { LoadConfig } from '../wailsjs/go/main/App';
 
-  type Tab = 'merge' | 'split' | 'inspect' | 'activity' | 'settings';
+  type Tab = 'merge' | 'split' | 'inspect' | 'ps1' | 'ps2' | 'activity' | 'settings';
   let activeTab: Tab = 'merge';
 
   $: tabs = [
     { id: 'merge' as Tab, label: $t('tab.merge'), icon: '📦', shortcut: '1' },
     { id: 'split' as Tab, label: $t('tab.split'), icon: '✂️', shortcut: '2' },
     { id: 'inspect' as Tab, label: $t('tab.inspect'), icon: '🔍', shortcut: '3' },
-    { id: 'activity' as Tab, label: $t('tab.activity'), icon: '📋', shortcut: '4' },
-    { id: 'settings' as Tab, label: $t('tab.settings'), icon: '⚙️', shortcut: '5' },
+    { id: 'ps1' as Tab, label: $t('tab.ps1'), icon: '💿', shortcut: '4' },
+    { id: 'ps2' as Tab, label: $t('tab.ps2'), icon: '📀', shortcut: '5' },
+    { id: 'activity' as Tab, label: $t('tab.activity'), icon: '📋', shortcut: '6' },
+    { id: 'settings' as Tab, label: $t('tab.settings'), icon: '⚙️', shortcut: '7' },
   ];
 
   onMount(() => {
@@ -78,6 +82,10 @@
       <SplitPage />
     {:else if activeTab === 'inspect'}
       <InspectPage />
+    {:else if activeTab === 'ps1'}
+      <PS1Page />
+    {:else if activeTab === 'ps2'}
+      <PS2Page />
     {:else if activeTab === 'activity'}
       <ActivityLog />
     {:else}
@@ -87,7 +95,7 @@
 
   <footer class="status-bar">
     <span>{$t('app.subtitle')}</span>
-    <span class="shortcuts-hint">⌘1-5 tabs</span>
+    <span class="shortcuts-hint">⌘1-7 tabs</span>
   </footer>
 </div>
 

@@ -17,6 +17,16 @@ export function ChunkLabels():Promise<Array<string>>;
 
 export function ClearHistory():Promise<void>;
 
+export function CreatePS1FPKG(arg1:main.PS1FPKGRequest):Promise<void>;
+
+export function CreatePS2FPKG(arg1:main.PS2FPKGRequest):Promise<void>;
+
+export function DetectDiscType(arg1:string):Promise<string>;
+
+export function DetectPS1Disc(arg1:string):Promise<main.PS1DiscDetectResult>;
+
+export function DetectPS2Disc(arg1:string):Promise<main.PS2DiscDetectResult>;
+
 export function DetectParts(arg1:string):Promise<main.DetectResult>;
 
 export function FormatSize(arg1:number):Promise<string>;
@@ -31,15 +41,25 @@ export function LoadConfig():Promise<core.Config>;
 
 export function MergeFiles(arg1:Array<string>,arg2:string,arg3:string):Promise<void>;
 
+export function OpenCUEFileDialog():Promise<string>;
+
 export function OpenDirectoryDialog():Promise<string>;
+
+export function OpenEmulatorDirDialog():Promise<string>;
 
 export function OpenFileDialog():Promise<string>;
 
 export function OpenFilesDialog():Promise<Array<string>>;
 
+export function OpenISOFileDialog():Promise<Array<string>>;
+
+export function OpenImageFileDialog(arg1:string):Promise<string>;
+
 export function RenamePKG(arg1:string):Promise<string>;
 
 export function SaveConfig(arg1:core.Config):Promise<void>;
+
+export function SavePKGFileDialog(arg1:string):Promise<string>;
 
 export function SplitFile(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<void>;
 
