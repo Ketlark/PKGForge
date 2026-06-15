@@ -1,7 +1,33 @@
-# XTS encryption skips the first PFS block (sectors 0–15)
+# ADR 0006: XTS encryption skips plaintext PFS blocks
 
-PFS outer encryption uses AES-128-XTS with 0x1000-byte sectors. Only sectors >= `BlockSize / sectorSize` (= 16, i.e. starting at byte offset 0x10000) are encrypted. The first PFS block (0x0000–0xFFFF, the header block) is left in plaintext.
+Date: 2026-06-13
 
-This matches `PfsReader` in C#, which creates `XtsDecryptReader` with `XtsStartSector = hdr.BlockSize / XtsSectorSize`. The `PFSBuilder.XtsSectorGen()` also starts yielding from sector 16.
+## Status
 
-Additionally, for signed PFS images, the empty block (after the flat path table) is **not encrypted**. `XtsSectorGen()` skips it: `if (xtsSector / 0x10 == emptyBlock) { xtsSector += 16; }`. Our current implementation encrypts all sectors >= 16, which is incorrect for blocks at the empty block index — but this doesn't cause extraction failures because the empty block contains only zeroes.
+Accepted
+
+## Context
+
+Outer PFS images use AES-128-XTS with 0x1000-byte sectors. LibOrbisPkg does not encrypt every sector in the image. It leaves the first PFS block plaintext so readers can parse the header before deriving decryption state.
+
+Signed outer PFS images also contain an empty block after the flat path table. LibOrbisPkg's sector generator skips that whole block during XTS encryption.
+
+## Decision
+
+PKG Forge leaves sectors 0-15 plaintext and starts XTS encryption at `BlockSize / 0x1000`. For signed outer PFS images, it also skips the empty block after the flat path table.
+
+## Consequences
+
+The outer PFS matches LibOrbisPkg sector encryption behavior. This keeps package size and encrypted block layout stable when comparing generated PKGs against PkgTool.Core output.
+
+The encryption function now accepts an optional block skip map. Callers that do not build signed outer PFS images can keep using the default XTS path.
+
+## Alternatives Considered
+
+### Encrypt every sector after the header
+
+This passed some extraction paths because the empty block contains zeroes, but it did not match LibOrbisPkg and left a hidden format difference in signed outer PFS images.
+
+### Special-case the skip inside the PFS builder only
+
+That would keep the crypto API smaller, but it would hide an XTS rule inside PFS assembly. Passing explicit skipped blocks keeps the behavior visible at the encryption boundary.
