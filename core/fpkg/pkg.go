@@ -1033,22 +1033,6 @@ func align64(v, align uint64) uint64 {
 	return v
 }
 
-// isInnerPFSSysExclusion returns true for sce_sys files that are emitted as
-// PKG body entries and therefore excluded from the inner PFS.
-// The PS4 installer copies PKG body entries to /app0/sce_sys/ at install time.
-// Files like keystone and about/right.sprx stay because they have no PKG body entry.
-func isInnerPFSSysExclusion(path string) bool {
-	if len(path) < 8 || path[:8] != "sce_sys/" {
-		return false
-	}
-	name := path[8:]
-	switch name {
-	case "param.sfo", "icon0.png", "pic1.png", "save_data.png":
-		return true
-	}
-	return false
-}
-
 func sortMetas(metas []metaEntry) {
 	for i := 0; i < len(metas)-1; i++ {
 		for j := i + 1; j < len(metas); j++ {

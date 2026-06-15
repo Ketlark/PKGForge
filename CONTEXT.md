@@ -48,7 +48,8 @@ A 36-character identifier for a PKG (e.g. `UP9000-SLUS00100_00-TESTGAME00000001`
 The 32-byte key used to derive PFS encryption and signing keys. For fPKGs, EKPFS = `ComputeKeys(contentID, passcode, 1)`.
 
 **Passcode**:
-A 32-character string used as the master key seed for fPKG key derivation. All-zeros by default for fPKGs.
+A 32-character ASCII string `"00000000000000000000000000000000"` used as the master key seed for fPKG key derivation. All reference implementations (LibOrbisPkg, orbis-pub-cmd) use this exact string. The keystone fingerprint is `HMAC-SHA256(KeystoneHMACKey, passcode)` and must be `294a5ed0...` for the PS4 save data subsystem to accept it. Using null bytes instead produces `1b15b363...`, causing `CHECK_KEYSTONE` (`0x809f805d`) during `sceSaveDataMount(CREATE)`.
+_Avoid_: null bytes, non-ASCII passcodes.
 
 **Entry**:
 A named data section in a PKG body. Entries include ENTRY_KEYS, IMAGE_KEY, GENERAL_DIGESTS, METAS, DIGESTS, ENTRY_NAMES, LICENSE_DAT, LICENSE_INFO, PARAM_SFO, PSRESERVED_DAT, and optional `sce_sys/` files.
@@ -171,7 +172,7 @@ The AES mode used for PFS encryption. Sectors 0–15 (first 64 KiB = header bloc
 > **Domain expert:** "That means the XTS decryption produced garbage for the super root inode. Check that `PfsGenCryptoKey` uses little-endian for the HMAC index — C#'s `BitConverter` is LE."
 
 > **Dev:** "Why do we PFSC-wrap the inner PFS if the data isn't compressed?"
-> **Domain expert:** "Because PkgTool.Core always reads `pfs_image.dat` through `PFSCReader`. Without the PFSC header, it throws 'missing PFSC magic'. The blocks are stored uncompressed — the wrapper is purely structural."
+> **Domain expert:** "Because PkgTool.Core always reads `pfs_image.dat` through `PFSCReader`. Without the PFSC header, it throws 'missing PFSC magic'. Blocks are zlib-compressed with `windowBits=12` (4 KB window) via `deflateInit2(level=6, Z_DEFLATED, 12, 8, Z_DEFAULT_STRATEGY)`, matching the PS4 kernel's PFSC decompressor (per flatz/pkg_pfs_tool `src/pfs.h:16`). Using Go's default `windowBits=15` (32 KB window) produces back-references the PS4 cannot decode, causing `_complete()` errors."
 
 > **Dev:** "The outer PFS inode for `pfs_image.dat` has size=71693312 but compressed_size=716172240. Why are they different?"
 > **Domain expert:** "Size is the PFSC-wrapped size (inner PFS + PFSC header + padded blocks). Compressed_size is the original inner PFS size before PFSC wrapping. PkgTool.Core uses `compressed_size` when extracting via PFSCReader — it tells the reader the logical length of the uncompressed data."
@@ -196,6 +197,15 @@ The AES mode used for PFS encryption. Sectors 0–15 (first 64 KiB = header bloc
 
 > **Dev:** "Klog says `sceFsMountGamePkg` cannot open `/mnt/sandbox/pfsmnt/<TITLE>-app0-nest/pfs_image.dat`, but PkgTool.Core extracts it."
 > **Domain expert:** "Check the outer PFS flat path table. The PS4 kernel lookup needs `hash('/pfs_image.dat')` to map to the file inode number. PkgTool.Core may still extract by walking dirents, so extraction alone does not prove runtime lookup works."
+
+> **Dev:** "PFS mounts successfully but `_complete()` errors appear in the klog and the game shows a black screen."
+> **Domain expert:** "The PFSC blocks are compressed with the wrong zlib window size. Go's `compress/flate` defaults to `windowBits=15` (32 KB window), but the PS4 kernel PFSC decompressor only supports `windowBits=12` (4 KB window). The compressed blocks contain back-references beyond 4 KB that the PS4 cannot decode. Use CGO to call `deflateInit2(level=6, Z_DEFLATED, 12, 8, Z_DEFAULT_STRATEGY)` directly."
+
+> **Dev:** "The PS1HD emulator launches (eboot.bin EXEC succeeds) but shows a black screen. Klog shows `sceSaveDataMount` looping with error `0x809f805d` for PS1.VMC and AppSmall."
+> **Domain expert:** "Error `0x809f805d` is `SCE_SAVE_DATA_I_ERROR_CHECK_KEYSTONE` — the keystone fingerprint doesn't match what the PS4 expects. The fPKG passcode must be the 32-character ASCII string `\"00000000000000000000000000000000\"` (0x30 repeated), not 32 null bytes (0x00). The null-byte passcode produces keystone fingerprint `1b15b363...` instead of the required `294a5ed0...`. The PS4 recovers EKPFS from IMAGE_KEY independently, so PFS decryption and SELF auth still work with the wrong passcode — only the save data subsystem catches the mismatch."
+
+> **Dev:** "The package installs but eboot.bin fails SELF auth with `sceSblAuthMgrAuthHeader:readHeader -37`."
+> **Domain expert:** "The eboot.bin SELF file is corrupted. Check the first 4 bytes — a valid PS4 SELF starts with `4f153d1d` or `7f534345`. If the first ~1 MB is zeros, the file was extracted incorrectly from a reference PKG. Re-extract with PkgTool.Core after patching pfs_flags from 0xA0 to 0x80 in a copy of the PKG (the PS4 uses raw EKPFS regardless of bit 61, but PkgTool.Core follows the flag for key derivation)."
 
 ## Flagged ambiguities
 
