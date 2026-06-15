@@ -10,6 +10,7 @@ package fpkg
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,10 +37,10 @@ func DefaultPS1EmulatorSet() *EmulatorSet {
 	return &EmulatorSet{
 		Name: "ps1hd",
 		Files: map[string]string{
-			"eboot.bin":              "eboot.bin",
-			"libc.prx":               "sce_module/libc.prx",
-			"libSceFios2.prx":        "sce_module/libSceFios2.prx",
-			"libSceNpToolkit2.prx":   "sce_module/libSceNpToolkit2.prx",
+			"eboot.bin":                       "eboot.bin",
+			"sce_module/libc.prx":             "sce_module/libc.prx",
+			"sce_module/libSceFios2.prx":      "sce_module/libSceFios2.prx",
+			"sce_module/libSceNpToolkit2.prx": "sce_module/libSceNpToolkit2.prx",
 		},
 	}
 }
@@ -48,11 +49,11 @@ func DefaultPS1EmulatorSet() *EmulatorSet {
 // Uses archive folder names ("Jak v2", "Rogue v1") and real file paths.
 func DefaultPS2EmulatorSets() map[PS2EmulatorType]*EmulatorSet {
 	jakFiles := map[string]string{
-		"eboot.bin":              "eboot.bin",
-		"libc.prx":               "sce_module/libc.prx",
-		"libSceFios2.prx":        "sce_module/libSceFios2.prx",
-		"ps2-emu-compiler.self":   "ps2-emu-compiler.self",
-		"PS20220WD20050620.crack": "PS20220WD20050620.crack",
+		"eboot.bin":                  "eboot.bin",
+		"sce_module/libc.prx":        "sce_module/libc.prx",
+		"sce_module/libSceFios2.prx": "sce_module/libSceFios2.prx",
+		"ps2-emu-compiler.self":      "ps2-emu-compiler.self",
+		"PS20220WD20050620.crack":    "PS20220WD20050620.crack",
 	}
 
 	return map[PS2EmulatorType]*EmulatorSet{
@@ -90,6 +91,50 @@ func LoadEmulatorFiles(emuDir string, emuSet *EmulatorSet) (map[string][]byte, e
 		files[virtualPath] = data
 	}
 
+	return files, nil
+}
+
+// LoadEmulatorDirectoryFiles loads every regular file from an emulator folder.
+// It is used as a best-effort companion to the required file map so complete
+// ps1hd/ps2 emulator directories can carry their sce_sys sidecar files too.
+func LoadEmulatorDirectoryFiles(emuDir string, emuSet *EmulatorSet) (map[string][]byte, error) {
+	root := filepath.Join(emuDir, emuSet.Name)
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		root = emuDir
+	}
+
+	files := make(map[string][]byte)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if entry.Type()&fs.ModeType != 0 {
+			return nil
+		}
+		if strings.HasPrefix(entry.Name(), ".") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if strings.Contains(rel, "..") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[rel] = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return files, nil
 }
 

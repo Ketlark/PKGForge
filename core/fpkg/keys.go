@@ -270,8 +270,11 @@ var FakeKeySeed = []byte{
 	0x46, 0x41, 0x4B, 0x45, 0x46, 0x41, 0x4B, 0x45, 0x46, 0x41, 0x4B, 0x45, 0x46, 0x41, 0x4B, 0x45,
 }
 
-// DefaultPasscode is the all-zeros passcode used for fPKGs.
-var DefaultPasscode = make([]byte, 0x20)
+// DefaultPasscode is the standard fPKG passcode: 32 ASCII '0' characters.
+// All reference implementations (LibOrbisPkg, orbis-pub-cmd, ps4-pkg-tool)
+// use this exact string. The PS4 save data subsystem validates the keystone
+// fingerprint against this passcode during sceSaveDataMount(CREATE).
+var DefaultPasscode = []byte("00000000000000000000000000000000")
 
 // KeystoneHMACKey is used to hash the first SHA256-HMAC in keystone.
 var KeystoneHMACKey = []byte{

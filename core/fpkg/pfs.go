@@ -35,14 +35,16 @@ type fsNode struct {
 }
 
 func (n *fsNode) fullPath() string {
+	return n.fullPathWithSuffix("")
+}
+
+func (n *fsNode) fullPathWithSuffix(suffix string) string {
 	if n.parent == nil {
-		return ""
+		return suffix
 	}
-	pp := n.parent.fullPath()
-	if pp == "" {
-		return n.name
-	}
-	return pp + "/" + n.name
+	// LibOrbis hashes absolute PFS paths in flat_path_table, including the
+	// leading slash for files directly under uroot.
+	return n.parent.fullPathWithSuffix("/" + n.name + suffix)
 }
 
 func (n *fsNode) size() int64 {
@@ -91,6 +93,16 @@ func direntSize(name string) int {
 	return sz
 }
 
+func dirNlink(dir *fsNode) uint16 {
+	nlink := uint16(2)
+	for _, child := range dir.children {
+		if child.isDir {
+			nlink++
+		}
+	}
+	return nlink
+}
+
 // ---------------------------------------------------------------------------
 // Inode interface (signed or unsigned)
 // ---------------------------------------------------------------------------
@@ -114,31 +126,31 @@ type inode interface {
 	setNlink(n uint16)
 }
 
-func (d *dinodeD32) getBlocks() uint32          { return d.Blocks }
-func (d *dinodeD32) setBlocks(b uint32)          { d.Blocks = b }
-func (d *dinodeD32) getSize() int64              { return d.Size }
-func (d *dinodeD32) setSize(s int64)              { d.Size = s }
-func (d *dinodeD32) getSizeCompressed() int64    { return d.SizeCompressed }
-func (d *dinodeD32) setSizeCompressed(s int64)    { d.SizeCompressed = s }
-func (d *dinodeD32) getFlags() uint32            { return d.Flags }
-func (d *dinodeD32) setFlags(f uint32)            { d.Flags = f }
-func (d *dinodeD32) getNumber() uint32           { return d.number }
-func (d *dinodeD32) setNumber(n uint32)           { d.number = n }
-func (d *dinodeD32) getNlink() uint16            { return d.Nlink }
-func (d *dinodeD32) setNlink(n uint16)            { d.Nlink = n }
+func (d *dinodeD32) getBlocks() uint32         { return d.Blocks }
+func (d *dinodeD32) setBlocks(b uint32)        { d.Blocks = b }
+func (d *dinodeD32) getSize() int64            { return d.Size }
+func (d *dinodeD32) setSize(s int64)           { d.Size = s }
+func (d *dinodeD32) getSizeCompressed() int64  { return d.SizeCompressed }
+func (d *dinodeD32) setSizeCompressed(s int64) { d.SizeCompressed = s }
+func (d *dinodeD32) getFlags() uint32          { return d.Flags }
+func (d *dinodeD32) setFlags(f uint32)         { d.Flags = f }
+func (d *dinodeD32) getNumber() uint32         { return d.number }
+func (d *dinodeD32) setNumber(n uint32)        { d.number = n }
+func (d *dinodeD32) getNlink() uint16          { return d.Nlink }
+func (d *dinodeD32) setNlink(n uint16)         { d.Nlink = n }
 
-func (d *dinodeS32) getBlocks() uint32          { return d.Blocks }
-func (d *dinodeS32) setBlocks(b uint32)          { d.Blocks = b }
-func (d *dinodeS32) getSize() int64              { return d.Size }
-func (d *dinodeS32) setSize(s int64)              { d.Size = s }
-func (d *dinodeS32) getSizeCompressed() int64    { return d.SizeCompressed }
-func (d *dinodeS32) setSizeCompressed(s int64)    { d.SizeCompressed = s }
-func (d *dinodeS32) getFlags() uint32            { return d.Flags }
-func (d *dinodeS32) setFlags(f uint32)            { d.Flags = f }
-func (d *dinodeS32) getNumber() uint32           { return d.number }
-func (d *dinodeS32) setNumber(n uint32)           { d.number = n }
-func (d *dinodeS32) getNlink() uint16            { return d.Nlink }
-func (d *dinodeS32) setNlink(n uint16)            { d.Nlink = n }
+func (d *dinodeS32) getBlocks() uint32         { return d.Blocks }
+func (d *dinodeS32) setBlocks(b uint32)        { d.Blocks = b }
+func (d *dinodeS32) getSize() int64            { return d.Size }
+func (d *dinodeS32) setSize(s int64)           { d.Size = s }
+func (d *dinodeS32) getSizeCompressed() int64  { return d.SizeCompressed }
+func (d *dinodeS32) setSizeCompressed(s int64) { d.SizeCompressed = s }
+func (d *dinodeS32) getFlags() uint32          { return d.Flags }
+func (d *dinodeS32) setFlags(f uint32)         { d.Flags = f }
+func (d *dinodeS32) getNumber() uint32         { return d.number }
+func (d *dinodeS32) setNumber(n uint32)        { d.number = n }
+func (d *dinodeS32) getNlink() uint16          { return d.Nlink }
+func (d *dinodeS32) setNlink(n uint16)         { d.Nlink = n }
 
 // ---------------------------------------------------------------------------
 // PFS builder
@@ -157,9 +169,9 @@ type PfsProperties struct {
 }
 
 type blockSigInfo struct {
-	block    int64
-	sigOff   int64
-	sigSize  int
+	block  int64
+	sigOff int64
+	size   int64
 }
 
 // BuildPFSImage constructs a complete PFS image and returns it as a byte slice.
@@ -213,23 +225,23 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 		var ino inode
 		if props.Sign {
 			d := &dinodeS32{
-				Mode:   mode,
-				Blocks: blocks,
-				Size:   size,
+				Mode:           mode,
+				Blocks:         blocks,
+				Size:           size,
 				SizeCompressed: size,
-				Nlink:  nlink,
-				Flags:  flags | InodeFlagUnk2 | InodeFlagUnk3,
+				Nlink:          nlink,
+				Flags:          flags | InodeFlagUnk2 | InodeFlagUnk3,
 			}
 			d.setTime(props.FileTime)
 			ino = d
 		} else {
 			d := &dinodeD32{
-				Mode:   mode,
-				Blocks: blocks,
-				Size:   size,
+				Mode:           mode,
+				Blocks:         blocks,
+				Size:           size,
 				SizeCompressed: size,
-				Nlink:  nlink,
-				Flags:  flags,
+				Nlink:          nlink,
+				Flags:          flags,
 			}
 			d.setTime(props.FileTime)
 			ino = d
@@ -259,7 +271,7 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 	}
 
 	// Uroot (the actual root)
-	urootIno := makeInode(InodeModeDir|InodeModeRXOnly, 1, 65536, InodeFlagReadonly, 3)
+	urootIno := makeInode(InodeModeDir|InodeModeRXOnly, 1, 65536, InodeFlagReadonly, dirNlink(props.Root))
 	urootIno.setNumber(inodeNum)
 	inodeNum++
 	inodes = append(inodes, urootIno)
@@ -274,7 +286,7 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 
 	// Add directory inodes
 	for _, dir := range allDirs {
-		ino := makeInode(InodeModeDir|InodeModeRXOnly, 1, 65536, InodeFlagReadonly, 2)
+		ino := makeInode(InodeModeDir|InodeModeRXOnly, 1, 65536, InodeFlagReadonly, dirNlink(dir))
 		ino.setNumber(inodeNum)
 		dir.ino = ino
 		inodes = append(inodes, ino)
@@ -322,35 +334,121 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 	hdr.InodeBlockSig.SizeCompressed = hdr.InodeBlockSig.Size
 	hdr.InodeBlockSig.setTime(props.FileTime)
 
-	hdr.Ndblock = int64(1) // header block
+	var dataSigs, finalSigs []blockSigInfo
+	emptyBlock := int64(-1)
+	layoutNodes := append([]*fsNode{props.Root}, allNodes...)
 
-	// Block allocation — same logic for both signed and unsigned PFS.
-	// The only difference is inode size (dinodeS32 vs dinodeD32), which
-	// is already reflected in inodeSize above.
-	{
-		// Inode blocks
+	hdr.Ndblock = 1 // header block
+	if props.Sign {
+		hdr.InodeBlockSig.Flags = 0
+		finalSigs = append(finalSigs, blockSigInfo{block: 0, sigOff: 0x380, size: 0x5A0})
+
+		for i := int64(0); i < hdr.DinodeBlockCount; i++ {
+			hdr.InodeBlockSig.setDirectBlock(int(i), 1+i)
+			finalSigs = append(finalSigs, blockSigInfo{block: 1 + i, sigOff: 0xB8 + 36*i, size: int64(props.BlockSize)})
+		}
+		hdr.Ndblock += hdr.DinodeBlockCount
+
+		superRootIno.setDirectBlock(0, int32(hdr.DinodeBlockCount+1))
+		finalSigs = append(finalSigs, blockSigInfo{block: int64(superRootIno.startBlock()), sigOff: inodeSigOffset(props.BlockSize, superRootIno, 0), size: int64(props.BlockSize)})
+		hdr.Ndblock += int64(superRootIno.getBlocks())
+
+		fptIno.setDirectBlock(0, int32(int64(superRootIno.startBlock())+1))
+		fptIno.setSize(int64(len(fptData)))
+		fptIno.setSizeCompressed(int64(len(fptData)))
+		fptBlocks := uint32(ceilDiv(int64(len(fptData)), int64(props.BlockSize)))
+		if fptBlocks == 0 {
+			fptBlocks = 1
+		}
+		fptIno.setBlocks(fptBlocks)
+		finalSigs = append(finalSigs, blockSigInfo{block: int64(fptIno.startBlock()), sigOff: inodeSigOffset(props.BlockSize, fptIno, 0), size: int64(props.BlockSize)})
+		for i := uint32(1); i < fptBlocks && i < 12; i++ {
+			fptIno.setDirectBlock(int(i), int32(hdr.Ndblock))
+			finalSigs = append(finalSigs, blockSigInfo{block: hdr.Ndblock, sigOff: inodeSigOffset(props.BlockSize, fptIno, int(i)), size: int64(props.BlockSize)})
+			hdr.Ndblock++
+		}
+
+		// LibOrbis advances past the flat path table, then leaves one zero
+		// block in the outer PFS that is intentionally not XTS-encrypted.
+		hdr.Ndblock++
+		emptyBlock = hdr.Ndblock
+		hdr.Ndblock++
+
+		ibStartBlock := hdr.Ndblock
+		for _, n := range layoutNodes {
+			hdr.Ndblock += calculateIndirectBlocks(n.size(), int64(props.BlockSize))
+		}
+
+		sigsPerBlock := int64(props.BlockSize) / 36
+		for _, n := range layoutNodes {
+			sz := n.size()
+			blocks := ceilDiv(sz, int64(props.BlockSize))
+			if blocks == 0 {
+				blocks = 1
+			}
+			n.ino.setDirectBlock(0, int32(hdr.Ndblock))
+			n.ino.setBlocks(uint32(blocks))
+			if n.isDir {
+				n.ino.setSize(ceilDiv(sz, int64(props.BlockSize)) * int64(props.BlockSize))
+			} else {
+				n.ino.setSize(sz)
+			}
+			if n.compressedSize > 0 {
+				n.ino.setSizeCompressed(n.compressedSize)
+			} else if n.ino.getSizeCompressed() == 0 {
+				n.ino.setSizeCompressed(n.ino.getSize())
+			}
+
+			for i := int64(0); blocks-i > 0 && i < 12; i++ {
+				dataSigs = append(dataSigs, blockSigInfo{block: hdr.Ndblock, sigOff: inodeSigOffset(props.BlockSize, n.ino, int(i)), size: int64(props.BlockSize)})
+				hdr.Ndblock++
+			}
+			if blocks > 12 {
+				finalSigs = append(finalSigs, blockSigInfo{block: ibStartBlock, sigOff: inodeSigOffset(props.BlockSize, n.ino, 12), size: int64(props.BlockSize)})
+				for i, pointerOffset := int64(12), int64(0); blocks-i > 0 && i < 12+sigsPerBlock; i, pointerOffset = i+1, pointerOffset+36 {
+					dataSigs = append(dataSigs, blockSigInfo{block: hdr.Ndblock, sigOff: ibStartBlock*int64(props.BlockSize) + pointerOffset, size: int64(props.BlockSize)})
+					hdr.Ndblock++
+				}
+				ibStartBlock++
+			}
+			if blocks > 12+sigsPerBlock {
+				blockSigsDone := int64(12 + sigsPerBlock)
+				finalSigs = append(finalSigs, blockSigInfo{block: ibStartBlock, sigOff: inodeSigOffset(props.BlockSize, n.ino, 13), size: int64(props.BlockSize)})
+				ib1Block := ibStartBlock
+				for i := int64(0); i < sigsPerBlock && blockSigsDone < blocks; i++ {
+					ibStartBlock++
+					finalSigs = append(finalSigs, blockSigInfo{block: ibStartBlock, sigOff: ib1Block*int64(props.BlockSize) + i*36, size: int64(props.BlockSize)})
+					for j := int64(0); j < sigsPerBlock && blockSigsDone < blocks; j++ {
+						dataSigs = append(dataSigs, blockSigInfo{block: hdr.Ndblock, sigOff: ibStartBlock*int64(props.BlockSize) + j*36, size: int64(props.BlockSize)})
+						hdr.Ndblock++
+						blockSigsDone++
+					}
+				}
+			}
+		}
+	} else {
 		hdr.InodeBlockSig.setDirectBlock(0, hdr.Ndblock)
-		for i := 1; i < int(hdr.DinodeBlockCount); i++ {
+		for i := int64(1); i < hdr.DinodeBlockCount; i++ {
 			if i < 12 {
-				hdr.InodeBlockSig.setDirectBlock(i, -1)
+				hdr.InodeBlockSig.setDirectBlock(int(i), -1)
 			}
 			hdr.Ndblock++
 		}
 		hdr.Ndblock++
 
-		// Super root dirents
 		superRootIno.setDirectBlock(0, int32(hdr.Ndblock))
-		hdr.Ndblock++
+		hdr.Ndblock += int64(superRootIno.getBlocks())
 
-		// Flat path table
 		fptIno.setDirectBlock(0, int32(hdr.Ndblock))
 		fptIno.setSize(int64(len(fptData)))
 		fptIno.setSizeCompressed(int64(len(fptData)))
 		fptBlocks := uint32(ceilDiv(int64(len(fptData)), int64(props.BlockSize)))
+		if fptBlocks == 0 {
+			fptBlocks = 1
+		}
 		fptIno.setBlocks(fptBlocks)
 		hdr.Ndblock += int64(fptBlocks)
 
-		// Empty block (or collision resolver)
 		if crIno == nil {
 			hdr.Ndblock++
 		} else {
@@ -358,12 +456,7 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 			hdr.Ndblock++
 		}
 
-		// Data blocks for uroot (root directory) and all child nodes
-		// C# adds properties.root to allNodes before this loop
-		urootNodes := []*fsNode{props.Root}
-		urootNodes = append(urootNodes, allNodes...)
-
-		for _, n := range urootNodes {
+		for _, n := range layoutNodes {
 			sz := n.size()
 			blocks := uint32(ceilDiv(sz, int64(props.BlockSize)))
 			if blocks == 0 {
@@ -374,15 +467,15 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 			if n.isDir {
 				n.ino.setSize(ceilDiv(sz, int64(props.BlockSize)) * int64(props.BlockSize))
 			} else {
-			n.ino.setSize(sz)
+				n.ino.setSize(sz)
 			}
 			if n.compressedSize > 0 {
 				n.ino.setSizeCompressed(n.compressedSize)
 			} else {
 				n.ino.setSizeCompressed(n.ino.getSize())
 			}
-			for i := 1; int(i) < int(blocks) && i < 12; i++ {
-				n.ino.setDirectBlock(i, -1)
+			for i := uint32(1); i < blocks && i < 12; i++ {
+				n.ino.setDirectBlock(int(i), -1)
 			}
 			hdr.Ndblock += int64(blocks)
 		}
@@ -425,6 +518,14 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 	seekTo(w, int64(fptIno.startBlock())*int64(props.BlockSize))
 	w.Write(fptData)
 
+	// Write file data before directory entries so directory blocks are the
+	// final authority for traversal tools that read the image directly.
+	for _, file := range allFiles {
+		blk := int64(file.ino.startBlock()) * int64(props.BlockSize)
+		seekTo(w, blk)
+		w.Write(file.data)
+	}
+
 	// Write uroot directory dirents
 	urootBlock := int64(props.Root.ino.startBlock()) * int64(props.BlockSize)
 	seekTo(w, urootBlock)
@@ -455,38 +556,42 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 		}
 	}
 
-	// Write file data
-	for _, file := range allFiles {
-		blk := int64(file.ino.startBlock()) * int64(props.BlockSize)
-		seekTo(w, blk)
-		w.Write(file.data)
-	}
-
 	// Sign if needed
 	if props.Sign {
+		// The PS4 kernel uses raw EKPFS for signing key derivation regardless
+		// of pfs_flags. Confirmed by klog analysis.
 		signKey := PfsGenSignKey(props.EKPFS, hdr.Seed)
-		// Sign header block
-		sig := HmacSha256(signKey, buf[0:0x5A0])
-		copy(buf[0x380:], sig)
-		binary.LittleEndian.PutUint32(buf[0x380+32:], 0)
+		signBlock := func(sigInfo blockSigInfo) {
+			start := sigInfo.block * int64(props.BlockSize)
+			end := start + sigInfo.size
+			sig := HmacSha256(signKey, buf[start:end])
+			copy(buf[sigInfo.sigOff:], sig)
+			binary.LittleEndian.PutUint32(buf[sigInfo.sigOff+32:], uint32(sigInfo.block))
+		}
 
-		// Sign inode blocks
-		for i := int64(0); i < hdr.DinodeBlockCount; i++ {
-			blkStart := int64(props.BlockSize) * (1 + i)
-			sig := HmacSha256(signKey, buf[blkStart:blkStart+int64(props.BlockSize)])
-			sigOff := 0xB8 + (36 * i)
-			copy(buf[sigOff:], sig)
-			binary.LittleEndian.PutUint32(buf[sigOff+32:], uint32(1+i))
+		for _, sigInfo := range dataSigs {
+			signBlock(sigInfo)
+		}
+		for i := len(finalSigs) - 1; i >= 0; i-- {
+			signBlock(finalSigs[i])
 		}
 	}
 
 	// Encrypt if needed
 	if props.Encrypt {
+		// The PS4 kernel uses raw EKPFS for XTS key derivation regardless of
+		// pfs_flags bit 61. Confirmed by klog analysis: a PKG built with raw
+		// EKPFS + pfs_flags=0xA0 mounts and executes eboot.bin successfully.
 		tweakKey, dataKey := PfsGenEncKey(props.EKPFS, hdr.Seed)
 		// XTS encryption starts at sector 16 (= BlockSize / XtsSectorSize = 0x10000 / 0x1000)
 		// Sectors 0-15 (first PFS block = header) remain plaintext.
 		startSector := int(props.BlockSize) / 0x1000
-		encrypted := AES128XTSEncrypt(buf, dataKey, tweakKey, 0x1000, startSector)
+		sectorsPerBlock := int(props.BlockSize) / 0x1000
+		var skipBlocks map[int64]bool
+		if emptyBlock >= 0 {
+			skipBlocks = map[int64]bool{emptyBlock: true}
+		}
+		encrypted := AES128XTSEncryptSkipBlocks(buf, dataKey, tweakKey, 0x1000, startSector, sectorsPerBlock, skipBlocks)
 		buf = encrypted
 	}
 
@@ -506,9 +611,9 @@ func buildFlatPathTable(nodes []*fsNode) []byte {
 	var entries []entry
 	for _, n := range nodes {
 		h := pfsHashFunction(n.fullPath())
-		var val uint32
+		val := n.ino.getNumber()
 		if n.isDir {
-			val = 0x20000000
+			val |= 0x20000000
 		}
 		entries = append(entries, entry{h, val})
 	}
@@ -580,6 +685,25 @@ func (w *bytesWriteSeeker) Seek(offset int64, whence int) (int64, error) {
 
 func ceilDiv(a, b int64) int64 {
 	return (a + b - 1) / b
+}
+
+func calculateIndirectBlocks(size, blockSize int64) int64 {
+	sigsPerBlock := blockSize / 36
+	blocks := ceilDiv(size, blockSize)
+	var indirectBlocks int64
+	if blocks > 12 {
+		blocks -= 12
+		indirectBlocks++
+	}
+	if blocks > sigsPerBlock {
+		blocks -= sigsPerBlock
+		indirectBlocks += 1 + ceilDiv(blocks, sigsPerBlock)
+	}
+	return indirectBlocks
+}
+
+func inodeSigOffset(blockSize uint32, ino inode, db int) int64 {
+	return int64(blockSize) + int64(dinodeS32Size)*int64(ino.getNumber()) + 0x64 + int64(36*db)
 }
 
 // ---------------------------------------------------------------------------

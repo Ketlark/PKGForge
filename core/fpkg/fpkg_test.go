@@ -1,6 +1,7 @@
 package fpkg
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -141,6 +142,49 @@ func TestAES128CBC(t *testing.T) {
 	t.Log("AES-128-CBC roundtrip OK")
 }
 
+func TestWriteEncryptedEntryRequiresBlockAlignedData(t *testing.T) {
+	contentID := "UP9000-SLUS00100_00-TESTGAME00000001"
+	entry := &pkgEntry{
+		id:         EntryIDLicenseDat,
+		name:       "license.dat",
+		data:       make([]byte, 15),
+		flags1:     0x80000000,
+		flags2:     3 << 12,
+		dataOffset: 0x2000,
+		dataSize:   15,
+	}
+
+	var buf bytes.Buffer
+	err := writeEncryptedEntry(&buf, entry, contentID, string(DefaultPasscode))
+	if err == nil {
+		t.Fatal("writeEncryptedEntry accepted unaligned data")
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("writeEncryptedEntry wrote %d bytes before failing", buf.Len())
+	}
+}
+
+func TestWriteEncryptedEntryDoesNotPadAlignedData(t *testing.T) {
+	contentID := "UP9000-SLUS00100_00-TESTGAME00000001"
+	entry := &pkgEntry{
+		id:         EntryIDLicenseDat,
+		name:       "license.dat",
+		data:       make([]byte, 16),
+		flags1:     0x80000000,
+		flags2:     3 << 12,
+		dataOffset: 0x2000,
+		dataSize:   16,
+	}
+
+	var buf bytes.Buffer
+	if err := writeEncryptedEntry(&buf, entry, contentID, string(DefaultPasscode)); err != nil {
+		t.Fatalf("writeEncryptedEntry failed: %v", err)
+	}
+	if buf.Len() != len(entry.data) {
+		t.Fatalf("encrypted entry size = %d, want %d", buf.Len(), len(entry.data))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test 6: AES-128-XTS
 // ---------------------------------------------------------------------------
@@ -224,6 +268,40 @@ func TestBuildInnerPFS(t *testing.T) {
 	t.Logf("Written to %s", outPath)
 }
 
+func TestFlatPathTableValuesIncludeInodeNumbers(t *testing.T) {
+	root := &fsNode{isDir: true}
+
+	fileIno := &dinodeD32{}
+	fileIno.setNumber(7)
+	file := &fsNode{name: "pfs_image.dat", parent: root, data: []byte("pfs"), ino: fileIno}
+
+	dirIno := &dinodeD32{}
+	dirIno.setNumber(8)
+	dir := &fsNode{name: "sce_sys", parent: root, isDir: true, ino: dirIno}
+
+	fpt := buildFlatPathTable([]*fsNode{file, dir})
+	if len(fpt) != 16 {
+		t.Fatalf("flat path table size = %d, want 16", len(fpt))
+	}
+
+	values := map[uint32]uint32{}
+	for off := 0; off < len(fpt); off += 8 {
+		hash := binary.LittleEndian.Uint32(fpt[off:])
+		value := binary.LittleEndian.Uint32(fpt[off+4:])
+		values[hash] = value
+	}
+
+	if got, want := values[pfsHashFunction("/pfs_image.dat")], uint32(7); got != want {
+		t.Fatalf("pfs_image.dat flat path table value = 0x%08X, want 0x%08X", got, want)
+	}
+	if got, want := values[pfsHashFunction("/sce_sys")], uint32(0x20000008); got != want {
+		t.Fatalf("sce_sys flat path table value = 0x%08X, want 0x%08X", got, want)
+	}
+	if _, exists := values[pfsHashFunction("pfs_image.dat")]; exists {
+		t.Fatal("flat path table should hash absolute PFS paths, not relative paths")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test 9: Full minimal fPKG build
 // ---------------------------------------------------------------------------
@@ -249,6 +327,19 @@ func TestBuildMinimalFPKG(t *testing.T) {
 	}
 
 	t.Logf("PKG size: %d bytes (%.2f MB)", len(pkgData), float64(len(pkgData))/(1024*1024))
+
+	// Verify minimum PKG size (header + body + at least 1 PFS block)
+	if len(pkgData) < 0x100000 {
+		t.Fatalf("PKG size = 0x%X, want at least 0x100000", len(pkgData))
+	}
+	// Verify pfs_image_size is non-zero and within the PKG
+	pfsImageSize := binary.BigEndian.Uint64(pkgData[0x418:0x420])
+	if pfsImageSize == 0 {
+		t.Fatalf("pfs_image_size = 0, want non-zero")
+	}
+	if got, want := binary.BigEndian.Uint64(pkgData[0x430:0x438]), uint64(len(pkgData)); got != want {
+		t.Fatalf("header package_size = 0x%X, want 0x%X", got, want)
+	}
 
 	// Check PKG magic
 	magic := string(pkgData[0:4])
@@ -280,11 +371,11 @@ func TestPS1FPKGSpiderMan(t *testing.T) {
 	outPath := filepath.Join(testOutputDir, "spider-man-fr.pkg")
 
 	err := CreatePS1FPKG(PS1FPKGOptions{
-		CuePath:   cuePath,
+		CuePath:    cuePath,
 		OutputPath: outPath,
-		Title:     "Spider-Man",
-		TitleID:   "SCES-02752",
-		Emulator:  "ps1_emu",
+		Title:      "Spider-Man",
+		TitleID:    "SCES-02752",
+		Emulator:   "ps1_emu",
 	})
 	if err != nil {
 		// If the error is about missing emulator files, skip instead of fail
@@ -324,6 +415,30 @@ func validateWithPkgTool(t *testing.T, pkgPath string) {
 		t.Logf("pkg_listentries error: %v", err)
 	}
 
+	t.Log("=== pkg_validate --verbose ===")
+	cmd = exec.Command(pkgToolPath, "pkg_validate", "--verbose", pkgPath)
+	out, err = cmd.CombinedOutput()
+	validateOutput := string(out)
+	t.Logf("%s", out)
+	if err != nil {
+		t.Errorf("pkg_validate FAILED: %v", err)
+	}
+	for _, marker := range []string{"[FAIL]", "[ERROR]"} {
+		if strings.Contains(validateOutput, marker) {
+			t.Errorf("pkg_validate reported %s", marker)
+		}
+	}
+	for _, expected := range []string{
+		"Content Digest",
+		"Major Param Digest",
+		"Param Digest",
+		"Debug RIF Signature",
+	} {
+		if !strings.Contains(validateOutput, expected) {
+			t.Errorf("pkg_validate did not check %q", expected)
+		}
+	}
+
 	// pkg_extract to temp dir
 	extractDir := filepath.Join(testOutputDir, "extract-"+filepath.Base(pkgPath))
 	os.RemoveAll(extractDir)
@@ -340,12 +455,16 @@ func validateWithPkgTool(t *testing.T, pkgPath string) {
 
 		// List extracted files
 		filepath.Walk(extractDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
 			if !info.IsDir() {
 				rel, _ := filepath.Rel(extractDir, path)
 				t.Logf("  extracted: %s (%d bytes)", rel, info.Size())
 			}
 			return nil
 		})
+		assertRuntimeExtraction(t, extractDir, "pkg_extract")
 	}
 
 	// pkg_extractinnerpfs
@@ -371,13 +490,34 @@ func validateWithPkgTool(t *testing.T, pkgPath string) {
 		} else {
 			t.Logf("Inner PFS extracted to %s", innerExtractDir)
 			filepath.Walk(innerExtractDir, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
 				if !info.IsDir() {
 					rel, _ := filepath.Rel(innerExtractDir, path)
 					t.Logf("  inner file: %s (%d bytes)", rel, info.Size())
 				}
 				return nil
 			})
+
+			if innerPFSPathExists(innerExtractDir, "data/disc1.bin") &&
+				!innerPFSPathExists(innerExtractDir, "sce_module/libc.prx") {
+				t.Log("Skipping pkg_extractinnerpfs content assertions: PkgTool.Core leaves the final 1 MiB of each 8 MiB copy chunk unread for large inner PFS images")
+			} else {
+				assertRuntimeExtraction(t, innerExtractDir, "inner PFS")
+			}
 		}
+	}
+
+	makeGP4Dir := filepath.Join(testOutputDir, "makegp4-"+filepath.Base(pkgPath))
+	os.RemoveAll(makeGP4Dir)
+	os.MkdirAll(makeGP4Dir, 0755)
+	t.Log("=== pkg_makegp4 ===")
+	cmd = exec.Command(pkgToolPath, "pkg_makegp4", pkgPath, makeGP4Dir)
+	out, err = cmd.CombinedOutput()
+	t.Logf("%s", out)
+	if err != nil {
+		t.Errorf("pkg_makegp4 FAILED: %v", err)
 	}
 }
 
@@ -433,6 +573,79 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func innerPFSPathExists(root, rel string) bool {
+	for _, candidate := range innerPFSCandidates(root, rel) {
+		if _, err := os.Stat(candidate); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func readInnerPFSFile(root, rel string) ([]byte, error) {
+	for _, candidate := range innerPFSCandidates(root, rel) {
+		if data, err := os.ReadFile(candidate); err == nil {
+			return data, nil
+		}
+	}
+	return nil, os.ErrNotExist
+}
+
+func assertRuntimeExtraction(t *testing.T, root, label string) {
+	t.Helper()
+
+	if keystone, err := readInnerPFSFile(root, "sce_sys/keystone"); err == nil {
+		expected := CreateKeystone(string(DefaultPasscode))
+		if !bytes.Equal(keystone, expected) {
+			t.Errorf("%s: sce_sys/keystone does not match package passcode", label)
+		}
+	}
+	if !innerPFSPathExists(root, "sce_sys/keystone") {
+		t.Errorf("%s: sce_sys/keystone should be present for /app0 runtime access", label)
+	}
+	if !innerPFSPathExists(root, "data/disc1.bin") {
+		return
+	}
+	for _, required := range []string{
+		"eboot.bin",
+		"config-title.txt",
+		"sce_sys/keystone",
+		"sce_module/libc.prx",
+		"sce_module/libSceFios2.prx",
+		"sce_module/libSceNpToolkit2.prx",
+		"data/disc1.bin",
+		"data/disc1.cue",
+		"data/disc1.toc",
+	} {
+		if !innerPFSPathExists(root, required) {
+			t.Errorf("%s: missing required PS1 runtime file %s", label, required)
+		}
+	}
+	for _, bios := range []string{"SCPH5500.bin", "SCPH5501.bin", "SCPH5502.bin"} {
+		if !innerPFSPathExists(root, "assets/PS1HD/bios/"+bios) && !innerPFSPathExists(root, "bios/"+bios) {
+			t.Errorf("%s: missing required PS1 BIOS file %s", label, bios)
+		}
+	}
+	cfg, err := readInnerPFSFile(root, "config-title.txt")
+	if err != nil {
+		t.Errorf("%s: read config-title.txt: %v", label, err)
+	} else if !strings.Contains(string(cfg), `--image="data/disc1.bin"`) {
+		t.Errorf("%s: config-title.txt missing PS1HD image path:\n%s", label, cfg)
+	}
+	for _, obsoleteRootPath := range []string{"libc.prx", "libSceFios2.prx", "libSceNpToolkit2.prx"} {
+		if innerPFSPathExists(root, obsoleteRootPath) {
+			t.Errorf("%s: should not place PS1 runtime module at app0 root: %s", label, obsoleteRootPath)
+		}
+	}
+}
+
+func innerPFSCandidates(root, rel string) []string {
+	return []string{
+		filepath.Join(root, rel),
+		filepath.Join(root, "uroot", rel),
+	}
 }
 
 // Verify PkgTool.Core is available

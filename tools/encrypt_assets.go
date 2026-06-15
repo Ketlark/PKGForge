@@ -6,10 +6,9 @@ package main
 // Usage:
 //   go run tools/encrypt_assets.go
 //
-// Prerequisites: the assets must have been downloaded first (run the app once
-// or call EnsureAssets manually so the cache exists).
+// Prerequisites: the staging cache must contain the emulator assets to embed.
 //
-// The archive format is a simple tar.zst encrypted with AES-256-GCM.
+// The archive format is a simple tar.gz encrypted with AES-256-GCM.
 // The encryption key is hardcoded in assets.go (compiled into the binary).
 
 import (
@@ -111,8 +110,7 @@ func isEssential(rel string) bool {
 
 	switch emu {
 	case "ps1hd":
-		return strings.Contains(rel, "eboot.bin") ||
-			strings.Contains(rel, "sce_module/")
+		return true
 	case "Jak v2", "Rogue v1":
 		return strings.Contains(rel, "eboot.bin") ||
 			strings.Contains(rel, "sce_module/") ||

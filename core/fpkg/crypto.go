@@ -78,8 +78,21 @@ func PfsGenCryptoKey(ekpfs, seed []byte, index uint32) []byte {
 
 // PfsGenEncKey generates a (tweakKey, dataKey) pair for AES-XTS.
 // Ported from Crypto.PfsGenEncKey.
+// When newCrypt is true, the EKPFS is first hashed via HMAC-SHA256(ekpfs, seed)
+// before being fed to PfsGenCryptoKey. This matches the PS4 kernel's behavior
+// when pfs_flags bit 61 (0x2000000000000000) is set.
 func PfsGenEncKey(ekpfs, seed []byte) (tweakKey, dataKey []byte) {
-	encKey := PfsGenCryptoKey(ekpfs, seed, 1)
+	return PfsGenEncKeyWithMode(ekpfs, seed, false)
+}
+
+// PfsGenEncKeyWithMode is the full version of PfsGenEncKey that honors the
+// newCrypt flag. newCrypt should be set when pfs_flags bit 61 is set.
+func PfsGenEncKeyWithMode(ekpfs, seed []byte, newCrypt bool) (tweakKey, dataKey []byte) {
+	keyMaterial := ekpfs
+	if newCrypt {
+		keyMaterial = HmacSha256(ekpfs, seed)
+	}
+	encKey := PfsGenCryptoKey(keyMaterial, seed, 1)
 	tweakKey = make([]byte, 16)
 	dataKey = make([]byte, 16)
 	copy(tweakKey, encKey[0:16])
@@ -275,6 +288,13 @@ func AES128CBCEncryptPad(data, key, iv []byte) []byte {
 // Sectors before startSector are left in plaintext.
 // Ported from XtsBlockTransform.
 func AES128XTSEncrypt(data, dataKey, tweakKey []byte, sectorSize, startSector int) []byte {
+	return AES128XTSEncryptSkipBlocks(data, dataKey, tweakKey, sectorSize, startSector, 0, nil)
+}
+
+// AES128XTSEncryptSkipBlocks is AES128XTSEncrypt with optional whole-block
+// exclusions. Outer signed PFS images contain a zero block that LibOrbis leaves
+// plaintext even though surrounding sectors are XTS-encrypted.
+func AES128XTSEncryptSkipBlocks(data, dataKey, tweakKey []byte, sectorSize, startSector, sectorsPerBlock int, skipBlocks map[int64]bool) []byte {
 	dataCipher, err := aes.NewCipher(dataKey)
 	if err != nil {
 		panic("fpkg: AES data key: " + err.Error())
@@ -290,6 +310,9 @@ func AES128XTSEncrypt(data, dataKey, tweakKey []byte, sectorSize, startSector in
 	for sectorNum := 0; sectorNum*sectorSize < len(out); sectorNum++ {
 		// Skip sectors before startSector (leave plaintext)
 		if sectorNum < startSector {
+			continue
+		}
+		if sectorsPerBlock > 0 && skipBlocks != nil && skipBlocks[int64(sectorNum/sectorsPerBlock)] {
 			continue
 		}
 		start := sectorNum * sectorSize
@@ -470,5 +493,3 @@ func hexDecode(s string) []byte {
 	}
 	return b
 }
-
-

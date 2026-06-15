@@ -106,6 +106,8 @@ type PS2FPKGOptions struct {
 
 	// DisplayMode: "4:3", "16:9", "auto"
 	DisplayMode string
+
+	OnProgress func(percent float64, phase string)
 }
 
 // ---------------------------------------------------------------------------
@@ -145,12 +147,12 @@ func GenerateBlankMemoryCard() []byte {
 	// Magic: 0x2B (MC) + version info
 	card[0x00] = 0x2B
 	copy(card[0x01:0x04], "MC")
-	binary.LittleEndian.PutUint16(card[0x04:0x06], 1)    // version
-	binary.LittleEndian.PutUint16(card[0x06:0x08], 0)                    // flags
-	binary.LittleEndian.PutUint32(card[0x08:0x0C], 8192)                  // total clusters
-	binary.LittleEndian.PutUint32(card[0x0C:0x10], 0x400000)              // total bytes
-	binary.LittleEndian.PutUint32(card[0x10:0x14], 1024)                  // cluster size
-	binary.LittleEndian.PutUint32(card[0x14:0x18], 8)                     // spare size (ECC)
+	binary.LittleEndian.PutUint16(card[0x04:0x06], 1)        // version
+	binary.LittleEndian.PutUint16(card[0x06:0x08], 0)        // flags
+	binary.LittleEndian.PutUint32(card[0x08:0x0C], 8192)     // total clusters
+	binary.LittleEndian.PutUint32(card[0x0C:0x10], 0x400000) // total bytes
+	binary.LittleEndian.PutUint32(card[0x10:0x14], 1024)     // cluster size
+	binary.LittleEndian.PutUint32(card[0x14:0x18], 8)        // spare size (ECC)
 
 	// FAT starts at cluster 0 (offset 0x2000 typically)
 	// Mark cluster 0 as free (already 0)
@@ -166,11 +168,11 @@ func GenerateBlankMemoryCard() []byte {
 // Format: UP9000-<TITLEID>_00-<GAMEID>0000<N>
 // e.g. UP9000-SLUS20062_00-SLUS200620000001
 func PS2ContentID(gameID string) string {
-	// Normalize: remove dash and pad
-	normalized := strings.ReplaceAll(gameID, "-", "")
+	// Normalize: SLUS-20062/SLUS_200.62 → SLUS20062.
+	normalized := normalizeTitleID(gameID)
 	// Build the suffix: GAMEID + "0000001"
 	suffix := normalized + "0000001"
-	return fmt.Sprintf("UP9000-%s_00-%s", gameID, suffix)
+	return fmt.Sprintf("UP9000-%s_00-%s", normalized, suffix)
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +233,9 @@ func BuildPS2Project(opts PS2FPKGOptions) (map[string][]byte, *DiscInfo, error) 
 	}
 
 	// 1. Parse the main disc
+	if opts.OnProgress != nil {
+		opts.OnProgress(5, "Parsing Disc 1")
+	}
 	mainISO := opts.ISOPaths[0]
 	ext := strings.ToLower(filepath.Ext(mainISO))
 
@@ -243,15 +248,13 @@ func BuildPS2Project(opts PS2FPKGOptions) (map[string][]byte, *DiscInfo, error) 
 	case ".cue":
 		discInfo, err = ParsePS2DiscFromCUE(mainISO)
 	case ".bin":
-		// Try to find matching .cue
-		cuePath := strings.TrimSuffix(mainISO, ext) + ".cue"
-		if _, statErr := os.Stat(cuePath); statErr == nil {
-			discInfo, err = ParsePS2DiscFromCUE(cuePath)
-		} else {
-			return nil, nil, fmt.Errorf(".bin file without matching .cue — please provide the .cue file instead")
+		cuePath, cueErr := companionCuePath(mainISO)
+		if cueErr != nil {
+			return nil, nil, cueErr
 		}
+		discInfo, err = ParsePS2DiscFromCUE(cuePath)
 	default:
-		return nil, nil, fmt.Errorf("unsupported file extension: %s (expected .iso or .cue)", ext)
+		return nil, nil, fmt.Errorf("unsupported file extension: %s (expected .iso, .cue, or .bin)", ext)
 	}
 
 	if err != nil {
@@ -283,10 +286,6 @@ func BuildPS2Project(opts PS2FPKGOptions) (map[string][]byte, *DiscInfo, error) 
 	// param.sfo
 	sfo := NewPS2ParamSfo(title, titleID, contentID)
 	files["sce_sys/param.sfo"] = sfo.Serialize()
-
-	// keystone
-	keystone := CreateKeystone(contentID)
-	files["sce_sys/keystone"] = keystone
 
 	// Icon and background
 	if opts.Icon0 != "" {
@@ -324,6 +323,9 @@ func BuildPS2Project(opts PS2FPKGOptions) (map[string][]byte, *DiscInfo, error) 
 		return nil, nil, fmt.Errorf("resolve emulator files: %w", loadErr)
 	}
 
+	if opts.OnProgress != nil {
+		opts.OnProgress(15, "Loading emulator files")
+	}
 	emuFiles, loadErr := LoadEmulatorFiles(emuDir, emuSet)
 	if loadErr != nil {
 		return nil, nil, fmt.Errorf("load ps2 emulator files: %w", loadErr)
@@ -358,26 +360,27 @@ func BuildPS2Project(opts PS2FPKGOptions) (map[string][]byte, *DiscInfo, error) 
 	}
 
 	// Disc images
+	tmpDir := filepath.Join(os.TempDir(), "pkg-forge-ps2")
 	for i, isoPath := range opts.ISOPaths {
 		discNum := i + 1
-		isoData, err := os.ReadFile(isoPath)
+		if opts.OnProgress != nil {
+			opts.OnProgress(30+float64(i)*5, fmt.Sprintf("Reading Disc %d image", discNum))
+		}
+		discData, needsLIMG, sectorSize, err := loadPS2DiscImage(isoPath, discNum, tmpDir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("read disc %d (%s): %w", discNum, isoPath, err)
 		}
-
-		// Determine if we need LIMG prepended (CD-based = 2352 bps)
-		needsLIMG := isCDBasedImage(isoPath, isoData)
 
 		discName := fmt.Sprintf("image/disc%02d.iso", discNum)
 
 		if needsLIMG {
 			// Calculate total sectors and prepend LIMG
-			totalSectors := uint32(len(isoData) / 2048)
+			totalSectors := uint32(len(discData) / sectorSize)
 			limg := GenerateLIMG(totalSectors)
-			combined := append(limg, isoData...)
+			combined := append(limg, discData...)
 			files[discName] = combined
 		} else {
-			files[discName] = isoData
+			files[discName] = discData
 		}
 	}
 
@@ -386,7 +389,81 @@ func BuildPS2Project(opts PS2FPKGOptions) (map[string][]byte, *DiscInfo, error) 
 		files["disc-swap-cli.conf"] = []byte(GenerateDiscSwapConfig(len(opts.ISOPaths)))
 	}
 
+	if opts.OnProgress != nil {
+		opts.OnProgress(60, "Project files ready")
+	}
 	return files, discInfo, nil
+}
+
+func companionCuePath(binPath string) (string, error) {
+	ext := filepath.Ext(binPath)
+	if strings.ToLower(ext) != ".bin" {
+		return binPath, nil
+	}
+
+	base := strings.TrimSuffix(binPath, ext)
+	for _, candidate := range []string{base + ".cue", base + ".CUE"} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	return "", fmt.Errorf(".bin file without matching .cue; please provide the .cue file instead")
+}
+
+func loadPS2DiscImage(path string, discNum int, tmpDir string) ([]byte, bool, int, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".iso":
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, false, 2048, err
+		}
+		return data, isCDBasedImage(path, data), 2048, nil
+	case ".cue":
+		tracks, err := ParseCUE(path)
+		if err != nil {
+			return nil, false, 2352, err
+		}
+		data, err := readCUEImage(tracks, discNum, tmpDir)
+		return data, true, 2352, err
+	case ".bin":
+		if cuePath, err := companionCuePath(path); err == nil {
+			tracks, err := ParseCUE(cuePath)
+			if err != nil {
+				return nil, false, 2352, err
+			}
+			data, err := readCUEImage(tracks, discNum, tmpDir)
+			return data, true, 2352, err
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, false, 2352, err
+		}
+		return data, true, 2352, nil
+	default:
+		return nil, false, 2048, fmt.Errorf("unsupported file extension: %s", ext)
+	}
+}
+
+func readCUEImage(tracks []CueTrack, discNum int, tmpDir string) ([]byte, error) {
+	binFiles := getUniqueBinFiles(tracks)
+	if len(binFiles) == 0 {
+		return nil, fmt.Errorf("cue has no bin files")
+	}
+	if len(binFiles) == 1 {
+		return os.ReadFile(binFiles[0])
+	}
+
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return nil, err
+	}
+	mergedPath := filepath.Join(tmpDir, fmt.Sprintf("disc%02d.bin", discNum))
+	if _, err := MergeBins(tracks, mergedPath); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(mergedPath)
 }
 
 // isCDBasedImage detects if a PS2 image is CD-based (2352 bps) vs DVD (2048 bps).
@@ -459,9 +536,15 @@ func PS2ContentHash(gameID string) string {
 // CreatePS2FPKG is the main entry point for PS2 fPKG creation.
 // It orchestrates the full pipeline: disc parsing → project setup → PFS → PKG.
 func CreatePS2FPKG(opts PS2FPKGOptions) error {
+	if opts.OnProgress != nil {
+		opts.OnProgress(0, "Preparing PS2 package")
+	}
 	files, discInfo, err := BuildPS2Project(opts)
 	if err != nil {
 		return err
+	}
+	if opts.OnProgress != nil {
+		opts.OnProgress(65, "Building PS4 package")
 	}
 
 	// Resolve title and ID
@@ -487,8 +570,13 @@ func CreatePS2FPKG(opts PS2FPKGOptions) error {
 	pkgOpts := PKGOptions{
 		Files:     files,
 		Title:     title,
-		TitleID:   titleID,
+		TitleID:   normalizeTitleID(titleID),
 		ContentID: contentID,
+		OnProgress: func(percent float64, phase string) {
+			if opts.OnProgress != nil {
+				opts.OnProgress(65+percent*0.3, phase)
+			}
+		},
 	}
 
 	pkgData, err := BuildFPKG(pkgOpts)
@@ -497,8 +585,14 @@ func CreatePS2FPKG(opts PS2FPKGOptions) error {
 	}
 
 	// Write output file
+	if opts.OnProgress != nil {
+		opts.OnProgress(97, "Writing package")
+	}
 	if err := os.WriteFile(opts.OutputPath, pkgData, 0644); err != nil {
 		return fmt.Errorf("write pkg: %w", err)
+	}
+	if opts.OnProgress != nil {
+		opts.OnProgress(100, "Complete")
 	}
 
 	return nil

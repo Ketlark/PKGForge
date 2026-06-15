@@ -58,10 +58,11 @@ type DiscInfo struct {
 
 // CueTrack represents a single track in a CUE sheet.
 type CueTrack struct {
-	Number   int
-	Mode     string // "MODE2/2352", "AUDIO", etc.
-	File     string
-	StartLBA int
+	Number    int
+	Mode      string // "MODE2/2352", "AUDIO", etc.
+	File      string
+	StartLBA  int
+	PregapLBA int // INDEX 00, or -1 when absent.
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +71,9 @@ type CueTrack struct {
 
 var cueTrackRe = regexp.MustCompile(`^\s*TRACK\s+(\d+)\s+(.+)`)
 var cueFileRe = regexp.MustCompile(`^\s*FILE\s+"(.+?)"\s+(.+)`)
+var cueIndex00Re = regexp.MustCompile(`^\s*INDEX\s+00\s+(\d+):(\d+):(\d+)`)
 var cueIndex01Re = regexp.MustCompile(`^\s*INDEX\s+01\s+(\d+):(\d+):(\d+)`)
+var gameIDRe = regexp.MustCompile(`(?i)([A-Z]{4})[-_]?(\d{3})\.?(\d{2})`)
 
 // ParseCUE reads a .cue file and returns the list of tracks.
 // The .bin file paths are resolved relative to the cue file's directory.
@@ -102,16 +105,25 @@ func ParseCUE(cuePath string) ([]CueTrack, error) {
 			num := 0
 			fmt.Sscanf(m[1], "%d", &num)
 			tracks = append(tracks, CueTrack{
-				Number: num,
-				Mode:   strings.TrimSpace(m[2]),
-				File:   currentFile,
+				Number:    num,
+				Mode:      strings.TrimSpace(m[2]),
+				File:      currentFile,
+				PregapLBA: -1,
 			})
 			cur = &tracks[len(tracks)-1]
 			continue
 		}
 
-		// INDEX 01 MM:SS:FF
+		// INDEX 00/01 MM:SS:FF
 		if cur != nil {
+			if m := cueIndex00Re.FindStringSubmatch(line); m != nil {
+				mm, ss, ff := 0, 0, 0
+				fmt.Sscanf(m[1], "%d", &mm)
+				fmt.Sscanf(m[2], "%d", &ss)
+				fmt.Sscanf(m[3], "%d", &ff)
+				cur.PregapLBA = mm*60*75 + ss*75 + ff
+				continue
+			}
 			if m := cueIndex01Re.FindStringSubmatch(line); m != nil {
 				mm, ss, ff := 0, 0, 0
 				fmt.Sscanf(m[1], "%d", &mm)
@@ -136,7 +148,7 @@ func ParseCUE(cuePath string) ([]CueTrack, error) {
 // PS1DiscResult holds the result of parsing a PS1 disc image.
 type PS1DiscResult struct {
 	Info     DiscInfo
-	TrackNum int // total number of tracks
+	TrackNum int  // total number of tracks
 	HasCDDA  bool // true if audio tracks present
 }
 
@@ -174,6 +186,7 @@ func ParsePS1Disc(cuePath string) (*PS1DiscResult, error) {
 		result.Info.GameID = gameID
 		result.Info.Region = regionFromID(gameID)
 	}
+	result.Info.Title = titleFromDiscPath(cuePath)
 
 	return result, nil
 }
@@ -216,16 +229,11 @@ func extractPS1GameID(tracks []CueTrack) (string, error) {
 		dataOffset = 24
 	}
 
-	// Strategy: read the first 16 sectors and search for game ID patterns
-	// The PS1 boot string is at sector 0, offset 0 (sync) then 0x000C-0x004F has the "Licensed by" text
-	// Game ID format: [A-Z]{4}-[0-9]{5}
-	idRe := regexp.MustCompile(`[A-Z]{4}-\d{5}`)
-
 	buf := make([]byte, sectorSize)
 
 	// Check sector 0 for boot ID (offset 0x236 in data area contains boot filename)
 	// Also scan early sectors for SYSTEM.CNF-like content
-	for sector := 0; sector < 16; sector++ {
+	for sector := 0; sector < 512; sector++ {
 		offset := int64(sector * sectorSize)
 		if sectorSize == 2352 {
 			offset += int64(dataOffset)
@@ -241,8 +249,8 @@ func extractPS1GameID(tracks []CueTrack) (string, error) {
 
 		// Search for the ID pattern in the sector data
 		text := string(buf[:n])
-		if matches := idRe.FindAllString(text, -1); len(matches) > 0 {
-			return matches[0], nil
+		if id := normalizeGameID(text); id != "" {
+			return id, nil
 		}
 	}
 
@@ -264,6 +272,7 @@ func ParsePS2Disc(isoPath string) (*DiscInfo, error) {
 
 	info := &DiscInfo{
 		Format: "iso",
+		Title:  titleFromDiscPath(isoPath),
 	}
 
 	// Read SYSTEM.CNF from the ISO
@@ -303,6 +312,7 @@ func ParsePS2DiscFromCUE(cuePath string) (*DiscInfo, error) {
 
 	info := &DiscInfo{
 		Format:     "bin",
+		Title:      titleFromDiscPath(cuePath),
 		Tracks:     tracks,
 		IsMultiBin: len(getUniqueBinFiles(tracks)) > 1,
 	}
@@ -452,50 +462,22 @@ func parseSystemCNF(data []byte) map[string]string {
 // Input:  "cdrom0:\SLUS_200.62;1" or "cdrom0:\\SLUS_200.62;1"
 // Output: "SLUS-20062"
 func extractPS2GameIDFromPath(path string) string {
-	// Remove cdrom0: prefix and path separators
-	path = strings.TrimPrefix(path, "cdrom0:")
-	path = strings.TrimPrefix(path, "\\")
-	path = strings.TrimPrefix(path, "/")
-
-	// Extract filename before semicolon
-	if idx := strings.Index(path, ";"); idx >= 0 {
-		path = path[:idx]
-	}
-
-	// Convert from SLUS_200.62 format to SLUS-20062
-	// The dot separates disc number from the serial suffix
-	id := strings.ReplaceAll(path, "_", "-")
-	id = strings.ReplaceAll(id, ".", "")
-
-	// Validate format: 4 letters, dash, 5 digits
-	re := regexp.MustCompile(`^[A-Z]{4}-\d{5}$`)
-	if re.MatchString(id) {
-		return id
-	}
-
-	return ""
+	return normalizeGameID(path)
 }
 
 // extractPS2GameIDFromISO attempts to find the game ID by scanning ISO sectors directly.
 func extractPS2GameIDFromISO(f *os.File) (string, error) {
 	buf := make([]byte, 2048)
-	idRe := regexp.MustCompile(`[A-Z]{4}_\d{3}\.\d{2}`)
 
-	// Scan first 32 sectors
-	for sector := 0; sector < 32; sector++ {
+	// Scan early sectors for boot executable references such as SLUS_200.62.
+	for sector := 0; sector < 512; sector++ {
 		_, err := f.ReadAt(buf, int64(sector)*2048)
 		if err != nil {
 			break
 		}
 		text := string(buf)
-		if matches := idRe.FindAllString(text, -1); len(matches) > 0 {
-			// Convert SLUS_200.62 to SLUS-20062
-			id := matches[0]
-			id = strings.ReplaceAll(id, "_", "-")
-			id = strings.ReplaceAll(id, ".", "")
-			if len(id) == 9 {
-				return id, nil
-			}
+		if id := normalizeGameID(text); id != "" {
+			return id, nil
 		}
 	}
 	return "", fmt.Errorf("PS2 game ID not found")
@@ -512,8 +494,8 @@ func readSystemCNFFromBin(f *os.File, track *CueTrack) ([]byte, error) {
 	// For Mode 2: data starts at offset 24, data length at offset 16-17 (2 bytes LE)
 	buf := make([]byte, sectorSize)
 
-	// Search sectors 0-16 for SYSTEM.CNF content
-	for sector := 0; sector < 16; sector++ {
+	// Search early sectors for SYSTEM.CNF content.
+	for sector := 0; sector < 512; sector++ {
 		offset := int64(sector * sectorSize)
 		_, err := f.Seek(offset, io.SeekStart)
 		if err != nil {
@@ -584,6 +566,30 @@ func resolvePath(baseDir, filename string) string {
 		return filename
 	}
 	return filepath.Join(baseDir, filename)
+}
+
+func normalizeGameID(text string) string {
+	m := gameIDRe.FindStringSubmatch(strings.ToUpper(text))
+	if m == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s-%s%s", m[1], m[2], m[3])
+}
+
+func normalizeTitleID(id string) string {
+	if normalized := normalizeGameID(id); normalized != "" {
+		return strings.ReplaceAll(normalized, "-", "")
+	}
+	replacer := strings.NewReplacer("-", "", "_", "", ".", "", " ", "")
+	return replacer.Replace(strings.ToUpper(id))
+}
+
+func titleFromDiscPath(path string) string {
+	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	title = strings.ReplaceAll(title, "_", " ")
+	title = strings.ReplaceAll(title, ".", " ")
+	title = strings.Join(strings.Fields(title), " ")
+	return title
 }
 
 // getUniqueBinFiles returns the unique .bin file paths from a track list.

@@ -39,6 +39,32 @@ var assetsKey = []byte("01234567890123456789012345678901")
 
 var assetsMu sync.Mutex
 
+const assetsManifestName = ".pkg-forge-assets-manifest"
+
+var requiredBundledAssetPaths = []string{
+	"emus/ps1hd/eboot.bin",
+	"emus/ps1hd/sce_module/libc.prx",
+	"emus/ps1hd/sce_module/libSceFios2.prx",
+	"emus/ps1hd/sce_module/libSceNpToolkit2.prx",
+	"emus/ps1hd/assets/PS1HD/bios/SCPH5500.bin",
+	"emus/ps1hd/assets/PS1HD/bios/SCPH5501.bin",
+	"emus/ps1hd/assets/PS1HD/bios/SCPH5502.bin",
+	"emus/ps1hd/assets/common/consola.ttf",
+	"emus/ps1hd/package-ps4.conf",
+	"emus/ps1hd/sce_discmap.plt",
+	"emus/ps1hd/sce_sys/about/right.sprx",
+	"emus/Jak v2/eboot.bin",
+	"emus/Jak v2/sce_module/libc.prx",
+	"emus/Jak v2/sce_module/libSceFios2.prx",
+	"emus/Jak v2/ps2-emu-compiler.self",
+	"emus/Jak v2/PS20220WD20050620.crack",
+	"emus/Rogue v1/eboot.bin",
+	"emus/Rogue v1/sce_module/libc.prx",
+	"emus/Rogue v1/sce_module/libSceFios2.prx",
+	"emus/Rogue v1/ps2-emu-compiler.self",
+	"emus/Rogue v1/PS20220WD20050620.crack",
+}
+
 // AssetsCacheDir returns the local cache directory for emulator assets.
 func AssetsCacheDir() (string, error) {
 	configDir, err := os.UserConfigDir()
@@ -55,8 +81,7 @@ func HasCachedAssets() bool {
 	if err != nil {
 		return false
 	}
-	info, err := os.Stat(filepath.Join(dir, "emus"))
-	return err == nil && info.IsDir()
+	return assetCacheMatchesBundle(dir)
 }
 
 // EnsureAssets extracts bundled assets to cache if not already present.
@@ -78,6 +103,9 @@ func EnsureAssets(progress func(float64)) error {
 		return fmt.Errorf("cache dir: %w", err)
 	}
 
+	if err := clearExtractedAssets(dir); err != nil {
+		return fmt.Errorf("clear stale assets: %w", err)
+	}
 	return extractBundledAssets(dir, progress)
 }
 
@@ -106,10 +134,9 @@ func ResolveEmulatorsDir(manualDir string, progress func(float64)) (string, erro
 // ---------------------------------------------------------------------------
 
 func extractBundledAssets(destDir string, progress func(float64)) error {
-	// Decrypt
-	data, err := decrypt(encryptedAssets, assetsKey)
+	data, err := decryptBundledAssets()
 	if err != nil {
-		return fmt.Errorf("decrypt assets: %w", err)
+		return err
 	}
 
 	// Decompress gzip
@@ -123,6 +150,7 @@ func extractBundledAssets(destDir string, progress func(float64)) error {
 	tr := tar.NewReader(gz)
 	total := len(data)
 	done := 0
+	var manifest []string
 
 	for {
 		hdr, err := tr.Next()
@@ -134,18 +162,7 @@ func extractBundledAssets(destDir string, progress func(float64)) error {
 		}
 
 		// Prefix with "emus/" if it's an emulator dir, otherwise keep as-is
-		rel := filepath.ToSlash(hdr.Name)
-		emu := rel
-		if idx := strings.Index(rel, "/"); idx >= 0 {
-			emu = rel[:idx]
-		}
-		var targetRel string
-		switch emu {
-		case "ps1hd", "Jak v2", "Rogue v1":
-			targetRel = filepath.Join("emus", rel)
-		default:
-			targetRel = rel // lua_include, etc.
-		}
+		targetRel := assetCacheRel(hdr.Name)
 
 		target := filepath.Join(destDir, targetRel)
 
@@ -158,6 +175,9 @@ func extractBundledAssets(destDir string, progress func(float64)) error {
 			if err := os.MkdirAll(target, 0755); err != nil {
 				return err
 			}
+			continue
+		}
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 
@@ -174,6 +194,7 @@ func extractBundledAssets(destDir string, progress func(float64)) error {
 		if err != nil {
 			return fmt.Errorf("extract %s: %w", targetRel, err)
 		}
+		manifest = append(manifest, filepath.ToSlash(targetRel))
 
 		done += int(written)
 		if progress != nil && total > 0 {
@@ -181,8 +202,133 @@ func extractBundledAssets(destDir string, progress func(float64)) error {
 		}
 	}
 
+	if err := validateRequiredBundledAssets(manifest); err != nil {
+		return err
+	}
+	if err := writeAssetsManifest(destDir, manifest); err != nil {
+		return err
+	}
+
 	if progress != nil {
 		progress(1.0)
+	}
+	return nil
+}
+
+func decryptBundledAssets() ([]byte, error) {
+	data, err := decrypt(encryptedAssets, assetsKey)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt assets: %w", err)
+	}
+	return data, nil
+}
+
+func bundledAssetCachePaths() ([]string, error) {
+	data, err := decryptBundledAssets()
+	if err != nil {
+		return nil, err
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("gzip reader: %w", err)
+	}
+	defer gz.Close()
+
+	var paths []string
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("tar read: %w", err)
+		}
+		if hdr.Typeflag == tar.TypeDir {
+			continue
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		rel := assetCacheRel(hdr.Name)
+		if strings.Contains(rel, "..") {
+			continue
+		}
+		paths = append(paths, filepath.ToSlash(rel))
+	}
+	return paths, validateRequiredBundledAssets(paths)
+}
+
+func assetCacheRel(archiveRel string) string {
+	rel := filepath.ToSlash(archiveRel)
+	rel = strings.TrimPrefix(rel, "./")
+	emu := rel
+	if idx := strings.Index(rel, "/"); idx >= 0 {
+		emu = rel[:idx]
+	}
+	switch emu {
+	case "ps1hd", "Jak v2", "Rogue v1":
+		return filepath.ToSlash(filepath.Join("emus", rel))
+	default:
+		return rel
+	}
+}
+
+func validateRequiredBundledAssets(paths []string) error {
+	present := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		present[filepath.ToSlash(path)] = true
+	}
+
+	var missing []string
+	for _, required := range requiredBundledAssetPaths {
+		if !present[required] {
+			missing = append(missing, required)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("bundled assets missing required runtime files: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func assetCacheMatchesBundle(dir string) bool {
+	expected, err := bundledAssetCachePaths()
+	if err != nil {
+		return false
+	}
+
+	actual, err := os.ReadFile(filepath.Join(dir, assetsManifestName))
+	if err != nil {
+		return false
+	}
+	if string(actual) != strings.Join(expected, "\n")+"\n" {
+		return false
+	}
+
+	for _, rel := range expected {
+		info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel)))
+		if err != nil || info.IsDir() {
+			return false
+		}
+	}
+	return true
+}
+
+func writeAssetsManifest(destDir string, paths []string) error {
+	var b strings.Builder
+	for _, path := range paths {
+		b.WriteString(filepath.ToSlash(path))
+		b.WriteByte('\n')
+	}
+	return os.WriteFile(filepath.Join(destDir, assetsManifestName), []byte(b.String()), 0644)
+}
+
+func clearExtractedAssets(dir string) error {
+	for _, rel := range []string{"emus", "lua_include", assetsManifestName} {
+		if err := os.RemoveAll(filepath.Join(dir, rel)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

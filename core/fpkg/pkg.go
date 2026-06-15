@@ -13,6 +13,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sort"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -20,8 +22,8 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	pkgContentIDSize = 0x24  // 36 bytes
-	pkgPasscodeSize  = 0x20  // 32 bytes
+	pkgContentIDSize = 0x24 // 36 bytes
+	pkgPasscodeSize  = 0x20 // 32 bytes
 	pkgHashSize      = 32
 )
 
@@ -51,32 +53,39 @@ const (
 	EntryIDLicenseInfo    uint32 = 0x00000401
 	EntryIDPSReservedDat  uint32 = 0x00000409
 	EntryIDParamSfo       uint32 = 0x00001000
+	EntryIDPlayGoChunkDat uint32 = 0x00001001
+	EntryIDPlayGoChunkSha uint32 = 0x00001002
+	EntryIDPlayGoManifest uint32 = 0x00001003
 	EntryIDIcon0Png       uint32 = 0x00001200
 	EntryIDPic0Png        uint32 = 0x00001220
 	EntryIDPic1Png        uint32 = 0x00001006
+	EntryIDSaveDataPng    uint32 = 0x0000100D
 )
 
 // Entry name to ID mapping (for sce_sys files)
 var entryNameToID = map[string]uint32{
-	"icon0.png":          EntryIDIcon0Png,
-	"pic0.png":           EntryIDPic0Png,
-	"pic1.png":           EntryIDPic1Png,
-	"param.sfo":          EntryIDParamSfo,
-	"license.dat":        EntryIDLicenseDat,
-	"license.info":       EntryIDLicenseInfo,
-	"nptitle.dat":        0x00000402,
-	"npbind.dat":         0x00000403,
-	"selfinfo.dat":       0x00000404,
-	"imageinfo.dat":      0x00000406,
-	"target-deltainfo.dat": 0x00000407,
-	"origin-deltainfo.dat": 0x00000408,
-	"psreserved.dat":     EntryIDPSReservedDat,
-	"pubtoolinfo.dat":    0x00001007,
-	"shareparam.json":    0x0000100B,
-	"shareoverlayimage.png": 0x0000100C,
-	"save_data.png":      0x0000100D,
+	"icon0.png":                  EntryIDIcon0Png,
+	"pic0.png":                   EntryIDPic0Png,
+	"pic1.png":                   EntryIDPic1Png,
+	"param.sfo":                  EntryIDParamSfo,
+	"license.dat":                EntryIDLicenseDat,
+	"license.info":               EntryIDLicenseInfo,
+	"nptitle.dat":                0x00000402,
+	"npbind.dat":                 0x00000403,
+	"selfinfo.dat":               0x00000404,
+	"imageinfo.dat":              0x00000406,
+	"target-deltainfo.dat":       0x00000407,
+	"origin-deltainfo.dat":       0x00000408,
+	"psreserved.dat":             EntryIDPSReservedDat,
+	"playgo-chunk.dat":           EntryIDPlayGoChunkDat,
+	"playgo-chunk.sha":           EntryIDPlayGoChunkSha,
+	"playgo-manifest.xml":        EntryIDPlayGoManifest,
+	"pubtoolinfo.dat":            0x00001007,
+	"shareparam.json":            0x0000100B,
+	"shareoverlayimage.png":      0x0000100C,
+	"save_data.png":              EntryIDSaveDataPng,
 	"shareprivacyguardimage.png": 0x0000100E,
-	"snd0.at9":           0x00001240,
+	"snd0.at9":                   0x00001240,
 }
 
 // ---------------------------------------------------------------------------
@@ -84,25 +93,25 @@ var entryNameToID = map[string]uint32{
 // ---------------------------------------------------------------------------
 
 type pkgEntry struct {
-	id             uint32
-	name           string
-	data           []byte
-	encrypted      bool
-	keyIndex       uint32
-	flags1         uint32
-	flags2         uint32
-	metaOffset     uint32
-	metaSize       uint32
+	id              uint32
+	name            string
+	data            []byte
+	encrypted       bool
+	keyIndex        uint32
+	flags1          uint32
+	flags2          uint32
+	metaOffset      uint32
+	metaSize        uint32
 	nameTableOffset uint32
-	dataOffset     uint32
-	dataSize       uint32
+	dataOffset      uint32
+	dataSize        uint32
 }
 
 type metaEntry struct {
 	id              uint32
 	nameTableOffset uint32
 	flags1          uint32
-	flags2         uint32
+	flags2          uint32
 	dataOffset      uint32
 	dataSize        uint32
 }
@@ -125,15 +134,16 @@ func (m *metaEntry) writeTo(w io.Writer) {
 
 // PKGOptions configures the PKG creation.
 type PKGOptions struct {
-	ContentID string            // e.g. "UP9000-SCUS94400_00-0000000000000001"
-	Passcode  string            // 32 chars, default all zeros
-	Files     map[string][]byte // game files (path -> content)
-	Icon0     []byte            // icon0.png data
-	Pic0      []byte            // pic0.png data (optional)
-	Pic1      []byte            // pic1.png data (optional)
-	ParamSfo  []byte            // param.sfo data (optional, generated if nil)
-	Title     string            // game title
-	TitleID   string            // e.g. "SCUS94400"
+	ContentID  string            // e.g. "UP9000-SCUS94400_00-0000000000000001"
+	Passcode   string            // 32 chars, default all zeros
+	Files      map[string][]byte // game files (path -> content)
+	Icon0      []byte            // icon0.png data
+	Pic0       []byte            // pic0.png data (optional)
+	Pic1       []byte            // pic1.png data (optional)
+	ParamSfo   []byte            // param.sfo data (optional, generated if nil)
+	Title      string            // game title
+	TitleID    string            // e.g. "SCUS94400"
+	OnProgress func(percent float64, phase string)
 }
 
 // BuildFPKG creates a complete PS4 fPKG from the given options.
@@ -149,24 +159,30 @@ func BuildFPKG(opts PKGOptions) ([]byte, error) {
 		return nil, fmt.Errorf("fpkg: content ID must be 36 chars, got %d", len(opts.ContentID))
 	}
 
-	// Generate param.sfo if not provided
-	sfoData := opts.ParamSfo
-	if sfoData == nil {
-		sfo := NewPS1ParamSfo(opts.Title, opts.TitleID, opts.ContentID)
-		sfoData = sfo.Serialize()
+	packageSFO, err := preparePackageSFO(opts)
+	if err != nil {
+		return nil, err
 	}
+	packageSFOData := packageSFO.Serialize()
 
 	// Build file map for inner PFS
 	files := make(map[string][]byte)
 	for k, v := range opts.Files {
 		files[k] = v
 	}
-	// Add sce_sys files
-	if files["sce_sys/param.sfo"] == nil {
-		files["sce_sys/param.sfo"] = sfoData
+	runtimeSFOData := opts.Files["sce_sys/param.sfo"]
+	if len(runtimeSFOData) == 0 {
+		runtimeSFOData = packageSFOData
 	}
+	files["sce_sys/param.sfo"] = runtimeSFOData
 	if opts.Icon0 != nil && files["sce_sys/icon0.png"] == nil {
 		files["sce_sys/icon0.png"] = opts.Icon0
+	}
+	if files["sce_sys/icon0.png"] == nil {
+		files["sce_sys/icon0.png"] = defaultIcon0PNG(opts.TitleID)
+	}
+	if files["sce_sys/save_data.png"] == nil {
+		files["sce_sys/save_data.png"] = defaultSaveDataPNG(opts.TitleID)
 	}
 	if opts.Pic0 != nil && files["sce_sys/pic0.png"] == nil {
 		files["sce_sys/pic0.png"] = opts.Pic0
@@ -174,18 +190,29 @@ func BuildFPKG(opts PKGOptions) ([]byte, error) {
 	if opts.Pic1 != nil && files["sce_sys/pic1.png"] == nil {
 		files["sce_sys/pic1.png"] = opts.Pic1
 	}
-	// Add keystone
-	if files["sce_sys/keystone"] == nil {
-		files["sce_sys/keystone"] = CreateKeystone(opts.Passcode)
+	if files["sce_sys/pic1.png"] == nil {
+		files["sce_sys/pic1.png"] = defaultPic1PNG(opts.TitleID)
 	}
+	// Keystone is derived from the package passcode. Keep it centralized here so
+	// every frontend-specific project builder stays consistent with PKG keys.
+	files["sce_sys/keystone"] = CreateKeystone(opts.Passcode)
+	opts.Files = files
 
-	// Build inner PFS (unsigned, unencrypted)
+	// Build inner PFS (unsigned, unencrypted).
+	// All files including sce_sys/ go into the inner PFS — the PS4 runtime
+	// needs /app0/sce_sys/param.sfo, save_data.png, etc. at launch.
+	if opts.OnProgress != nil {
+		opts.OnProgress(15, "Building inner filesystem")
+	}
 	innerPFS, err := BuildPFS(files, 0x10000, 0x55)
 	if err != nil {
 		return nil, fmt.Errorf("fpkg: inner PFS: %w", err)
 	}
 
 	// PFSC-wrap the inner PFS
+	if opts.OnProgress != nil {
+		opts.OnProgress(35, "Wrapping filesystem")
+	}
 	pfscWrapped := wrapPFSC(innerPFS)
 
 	// Compute EKPFS
@@ -212,22 +239,58 @@ func BuildFPKG(opts PKGOptions) ([]byte, error) {
 		Seed:      make([]byte, 16),
 		MinBlocks: 0,
 	}
+	if opts.OnProgress != nil {
+		opts.OnProgress(55, "Building encrypted filesystem")
+	}
 	outerPFS, err := BuildPFSImage(outerProps)
 	if err != nil {
 		return nil, fmt.Errorf("fpkg: outer PFS: %w", err)
 	}
 
 	// Build PKG
-	pkg, err := assemblePKG(opts, sfoData, outerPFS, ekpfs)
+	if opts.OnProgress != nil {
+		opts.OnProgress(80, "Assembling package")
+	}
+	pkg, err := assemblePKG(opts, packageSFO, packageSFOData, outerPFS, ekpfs, uint64(len(innerPFS)))
 	if err != nil {
 		return nil, fmt.Errorf("fpkg: PKG assembly: %w", err)
+	}
+	if opts.OnProgress != nil {
+		opts.OnProgress(95, "Package assembled")
 	}
 
 	return pkg, nil
 }
 
+func preparePackageSFO(opts PKGOptions) (*ParamSfo, error) {
+	sfoData := opts.ParamSfo
+	if len(sfoData) == 0 {
+		sfoData = opts.Files["sce_sys/param.sfo"]
+	}
+
+	var sfo *ParamSfo
+	if len(sfoData) > 0 {
+		parsed, err := ParseParamSfo(sfoData)
+		if err != nil {
+			return nil, fmt.Errorf("fpkg: param.sfo: %w", err)
+		}
+		sfo = parsed
+	} else {
+		sfo = NewPS1ParamSfo(opts.Title, opts.TitleID, opts.ContentID)
+	}
+
+	sfo.Set("CONTENT_ID", opts.ContentID, 48)
+	if opts.TitleID != "" {
+		sfo.Set("TITLE_ID", normalizeTitleID(opts.TitleID), 12)
+	}
+	sfo.Set("PUBTOOLINFO", "", 0x200)
+	sfo.SetInt("PUBTOOLMINVER", 0x02990000)
+	sfo.SetInt("PUBTOOLVER", 0x03380000)
+	return sfo, nil
+}
+
 // assemblePKG builds the complete PKG binary from components.
-func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, error) {
+func assemblePKG(opts PKGOptions, sfo *ParamSfo, sfoData, outerPFS, ekpfs []byte, innerPFSSize uint64) ([]byte, error) {
 	pfsSize := uint64(len(outerPFS))
 	bodyOffset := uint64(0x2000)
 	pfsImageOffset := uint64(0x80000)
@@ -241,7 +304,7 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 	entryKeys := buildEntryKeys(opts.ContentID, opts.Passcode)
 	entries = append(entries, &pkgEntry{
 		id:     EntryIDEntryKeys,
-		name:   ".entry_keys",
+		name:   "",
 		data:   entryKeys,
 		flags1: 0x60000000,
 	})
@@ -249,10 +312,10 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 	// IMAGE_KEY
 	imageKey := RSA2048EncryptKey(FakeKeyset.Modulus, ekpfs)
 	entries = append(entries, &pkgEntry{
-		id:      EntryIDImageKey,
-		name:    ".image_key",
-		data:    padTo(imageKey, 256),
-		flags1:  0xE0000000,
+		id:     EntryIDImageKey,
+		name:   "",
+		data:   padTo(imageKey, 256),
+		flags1: 0xE0000000,
 		flags2: 3 << 12,
 	})
 
@@ -262,22 +325,24 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 	binary.BigEndian.PutUint16(gdData[2:], 0x100)
 	entries = append(entries, &pkgEntry{
 		id:     EntryIDGeneralDigests,
-		name:   ".general_digests",
+		name:   "",
 		data:   gdData,
 		flags1: 0x60000000,
 	})
 
 	// METAS (placeholder, filled later)
 	metasEntry := &pkgEntry{
-		id:   EntryIDMetas,
-		name: ".metas",
+		id:     EntryIDMetas,
+		name:   "",
+		flags1: 0x60000000,
 	}
 	entries = append(entries, metasEntry)
 
 	// DIGESTS (placeholder)
 	digestsEntry := &pkgEntry{
-		id:   EntryIDDigests,
-		name: ".digests",
+		id:     EntryIDDigests,
+		name:   "",
+		flags1: 0x40000000,
 	}
 	entries = append(entries, digestsEntry)
 
@@ -285,28 +350,46 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 	entryNames := buildEntryNames(entries)
 	entries = append(entries, &pkgEntry{
 		id:     EntryIDEntryNames,
-		name:   ".entry_names",
+		name:   "",
 		data:   entryNames,
 		flags1: 0x40000000,
 	})
 
+	entries = append(entries,
+		&pkgEntry{
+			id:   EntryIDPlayGoChunkDat,
+			name: "playgo-chunk.dat",
+			data: buildPlayGoChunkDat(opts.ContentID, 0, innerPFSSize),
+		},
+		&pkgEntry{
+			id:   EntryIDPlayGoChunkSha,
+			name: "playgo-chunk.sha",
+		},
+		&pkgEntry{
+			id:   EntryIDPlayGoManifest,
+			name: "playgo-manifest.xml",
+			data: defaultPlayGoManifest(),
+		},
+	)
+
 	// LICENSE_DAT
-	licenseDat := buildLicenseDat(opts.ContentID)
+	licenseDat, err := buildLicenseDat(opts.ContentID)
+	if err != nil {
+		return nil, err
+	}
 	entries = append(entries, &pkgEntry{
-		id:      EntryIDLicenseDat,
-		name:    "license.dat",
-		data:    licenseDat,
-		flags1:  0x80000000,
+		id:     EntryIDLicenseDat,
+		name:   "",
+		data:   licenseDat,
+		flags1: 0x80000000,
 		flags2: 3 << 12,
 	})
 
-	// LICENSE_INFO
-	licenseInfo := make([]byte, 0x200)
 	entries = append(entries, &pkgEntry{
-		id:      EntryIDLicenseInfo,
-		name:    "license.info",
-		data:    licenseInfo,
-		flags1:  0x80000000,
+		id:     EntryIDLicenseInfo,
+		name:   "",
+		data:   buildLicenseInfo(opts.ContentID),
+		flags1: 0x80000000,
 		flags2: 2 << 12,
 	})
 
@@ -320,7 +403,7 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 	// PSRESERVED_DAT
 	entries = append(entries, &pkgEntry{
 		id:   EntryIDPSReservedDat,
-		name: "psreserved.dat",
+		name: "",
 		data: make([]byte, 0x2000),
 	})
 
@@ -347,13 +430,12 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 	nameOffsets := make(map[string]uint32)
 	nameOffsets[""] = 0
 	for _, e := range entries {
-		if e.name == "" {
-			e.name = "\x00"
-		}
-		if _, ok := nameOffsets[e.name]; !ok {
-			nameOffsets[e.name] = uint32(len(nameTable))
-			nameTable = append(nameTable, []byte(e.name)...)
-			nameTable = append(nameTable, 0)
+		if e.name != "" {
+			if _, ok := nameOffsets[e.name]; !ok {
+				nameOffsets[e.name] = uint32(len(nameTable))
+				nameTable = append(nameTable, []byte(e.name)...)
+				nameTable = append(nameTable, 0)
+			}
 		}
 	}
 
@@ -363,6 +445,8 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 			e.data = nameTable
 		}
 	}
+
+	updatePlayGoChunkShaSize(entries, bodyOffset, pfsSize)
 
 	// Build metas and calculate data offsets
 	var metas []metaEntry
@@ -381,7 +465,7 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 			id:              e.id,
 			nameTableOffset: nameOffsets[e.name],
 			flags1:          e.flags1,
-			flags2:         e.flags2,
+			flags2:          e.flags2,
 			dataOffset:      dataOffset,
 			dataSize:        size,
 		}
@@ -418,24 +502,36 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 	}
 
 	// Recalculate body size
-	actualBodySize := align64(uint64(dataOffset) - bodyOffset, 0x80000)
+	actualBodySize := align64(uint64(dataOffset), 0x80000) - bodyOffset
 	bodySize = actualBodySize
 	pfsImageOffset = bodyOffset + bodySize
 	packageSize = pfsImageOffset + pfsSize
+	mainEntDataSize := calcMainEntryDataSize(entries)
+	if chunkDat := findEntry(entries, EntryIDPlayGoChunkDat); chunkDat != nil {
+		chunkDat.data = buildPlayGoChunkDat(opts.ContentID, packageSize, innerPFSSize)
+	}
+	sfo.Set("PUBTOOLINFO", buildPubToolInfo(packageSize), 0x200)
+	finalSFOData := sfo.Serialize()
+	if uint32(len(finalSFOData)) != findEntry(entries, EntryIDParamSfo).dataSize {
+		return nil, fmt.Errorf("fpkg: final param.sfo size changed from %d to %d", findEntry(entries, EntryIDParamSfo).dataSize, len(finalSFOData))
+	}
+	findEntry(entries, EntryIDParamSfo).data = finalSFOData
 
 	// Allocate PKG buffer
-	totalSize := pfsImageOffset + pfsSize
+	totalSize := packageSize
 	pkg := make([]byte, totalSize)
 	w := newBytesWriteSeeker(pkg)
 
 	// Write PKG header
-	writePKGHeader(w, opts, len(entries), bodyOffset, bodySize, pfsImageOffset, pfsSize, packageSize)
+	writePKGHeader(w, opts, len(entries), mainEntDataSize, bodyOffset, bodySize, pfsImageOffset, pfsSize, packageSize)
 
 	// Write body entries
 	for _, e := range entries {
 		seekTo(w, int64(e.metaOffset))
 		if e.encrypted {
-			writeEncryptedEntry(w, e, opts.ContentID, opts.Passcode)
+			if err := writeEncryptedEntry(w, e, opts.ContentID, opts.Passcode); err != nil {
+				return nil, err
+			}
 		} else {
 			w.Write(e.data)
 		}
@@ -445,11 +541,15 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 	seekTo(w, int64(pfsImageOffset))
 	w.Write(outerPFS)
 
+	if err := writePlayGoChunkSha(pkg, entries, pfsImageOffset, packageSize); err != nil {
+		return nil, err
+	}
+
 	// Calculate digests
-	calculateDigests(pkg, entries, bodyOffset, bodySize, pfsImageOffset, pfsSize)
+	calculateDigests(pkg, entries, opts.ContentID, sfo, bodyOffset, bodySize, pfsImageOffset, pfsSize)
 
 	// Re-write header with digests
-	writePKGHeader(w, opts, len(entries), bodyOffset, bodySize, pfsImageOffset, pfsSize, packageSize)
+	writePKGHeader(w, opts, len(entries), mainEntDataSize, bodyOffset, bodySize, pfsImageOffset, pfsSize, packageSize)
 
 	// Final: header digest and signature
 	headerDigest := Sha256(pkg[0:0xFE0])
@@ -464,59 +564,59 @@ func assemblePKG(opts PKGOptions, sfoData, outerPFS, ekpfs []byte) ([]byte, erro
 // PKG header writer
 // ---------------------------------------------------------------------------
 
-func writePKGHeader(w io.WriteSeeker, opts PKGOptions, entryCount int, bodyOffset, bodySize, pfsImageOffset, pfsSize, packageSize uint64) {
+func writePKGHeader(w io.WriteSeeker, opts PKGOptions, entryCount int, mainEntDataSize uint32, bodyOffset, bodySize, pfsImageOffset, pfsSize, packageSize uint64) {
 	seekTo(w, 0x00)
 	w.Write([]byte("\x7fCNT"))
 	seekTo(w, 0x04)
-	writeBE(w, uint32(0x01)) // flags
+	writeBE(w, uint32(0x40000001)) // flags: Unknown | INTERNAL (relaxes SELF auth for fPKGs)
 	writeBE(w, uint32(0))    // unk_0x08
 	writeBE(w, uint32(0xF))  // unk_0x0C
 	writeBE(w, uint32(entryCount))
 	seekTo(w, 0x14)
-	writeBE(w, uint16(6))            // sc_entry_count (uint16)
-	writeBE(w, uint16(entryCount))   // entry_count_2 (uint16)
+	writeBE(w, uint16(6))          // sc_entry_count (uint16)
+	writeBE(w, uint16(entryCount)) // entry_count_2 (uint16)
 	seekTo(w, 0x18)
 	writeBE(w, uint32(0x2A80)) // entry_table_offset
-	writeBE(w, uint32(0xD00))  // main_ent_data_size
-	writeBE(w, bodyOffset)     // body_offset
+	writeBE(w, mainEntDataSize)
+	writeBE(w, bodyOffset) // body_offset
 	seekTo(w, 0x28)
-	writeBE(w, bodySize)       // body_size
+	writeBE(w, bodySize) // body_size
 	seekTo(w, 0x40)
 	w.Write([]byte(opts.ContentID))
 	seekTo(w, 0x70)
-	writeBE(w, uint32(DrmTypePS4))      // drm_type
-	writeBE(w, uint32(ContentTypeGD))    // content_type
-	writeBE(w, uint32(0x0A000000))       // content_flags
+	writeBE(w, uint32(DrmTypePS4))          // drm_type
+	writeBE(w, uint32(ContentTypeGD))       // content_type
+	writeBE(w, uint32(0x0A000000))          // content_flags
 	writeBE(w, uint32(bodyOffset+bodySize)) // promote_size
 	seekTo(w, 0x80)
-	writeBE(w, uint32(0x20161020))       // version_date
-	writeBE(w, uint32(0x1738551))        // version_hash
-	writeBE(w, uint32(0))                // unk_0x88
-	writeBE(w, uint32(0))                // unk_0x8C
-	writeBE(w, uint32(0))                // unk_0x90
-	writeBE(w, uint32(0))                // unk_0x94
-	writeBE(w, uint32(0))                // iro_tag
-	writeBE(w, uint32(1))                // ekc_version
+	writeBE(w, uint32(0x20171106)) // version_date (SDK 5.05, matches orbis-pub-cmd)
+	writeBE(w, uint32(0x01889410)) // version_hash
+	writeBE(w, uint32(0))          // unk_0x88
+	writeBE(w, uint32(0))          // unk_0x8C
+	writeBE(w, uint32(0))          // unk_0x90
+	writeBE(w, uint32(0))          // unk_0x94
+	writeBE(w, uint32(0))          // iro_tag
+	writeBE(w, uint32(1))          // ekc_version
 
 	// PFS image info
 	seekTo(w, 0x400)
-	writeBE(w, uint32(1))                // unk_0x400
-	writeBE(w, uint32(1))                // pfs_image_count
-	writeBE(w, uint64(0x80000000000003CC)) // pfs_flags
+	writeBE(w, uint32(1))                  // unk_0x400
+	writeBE(w, uint32(1))                  // pfs_image_count
+	writeBE(w, uint64(0x80000000000003CC)) // pfs_flags (LibOrbisPkg standard; PS4 uses raw EKPFS regardless)
 	seekTo(w, 0x410)
-	writeBE(w, pfsImageOffset)           // pfs_image_offset
+	writeBE(w, pfsImageOffset) // pfs_image_offset
 	seekTo(w, 0x418)
-	writeBE(w, pfsSize)                  // pfs_image_size
+	writeBE(w, pfsSize) // pfs_image_size
 	seekTo(w, 0x420)
-	writeBE(w, uint64(0))                // mount_image_offset
+	writeBE(w, uint64(0)) // mount_image_offset
 	seekTo(w, 0x428)
-	writeBE(w, uint64(0))                // mount_image_size
+	writeBE(w, packageSize) // mount_image_size
 	seekTo(w, 0x430)
-	writeBE(w, packageSize)              // package_size
+	writeBE(w, packageSize) // package_size
 	seekTo(w, 0x438)
-	writeBE(w, uint32(0x10000))          // pfs_signed_size
+	writeBE(w, uint32(0x10000)) // pfs_signed_size
 	seekTo(w, 0x43C)
-	writeBE(w, uint32(0xD0000))          // pfs_cache_size
+	writeBE(w, uint32(0xE0000)) // pfs_cache_size (matches orbis-pub-cmd output)
 }
 
 // ---------------------------------------------------------------------------
@@ -582,20 +682,197 @@ func buildEntryNames(entries []*pkgEntry) []byte {
 	return buf
 }
 
-func buildLicenseDat(contentID string) []byte {
-	// Minimal license.dat for fPKG
+func buildLicenseDat(contentID string) ([]byte, error) {
+	buf := make([]byte, 0x400)
+	binary.BigEndian.PutUint32(buf[0x00:], 0x52494600) // "RIF\0"
+	binary.BigEndian.PutUint16(buf[0x04:], 1)
+	binary.BigEndian.PutUint16(buf[0x06:], 0xFFFF)
+	binary.BigEndian.PutUint64(buf[0x08:], 0)
+	binary.BigEndian.PutUint64(buf[0x10:], 1364222275)
+	binary.BigEndian.PutUint64(buf[0x18:], 0x7FFFFFFFFFFFFFFF)
+	copy(buf[0x20:], []byte(contentID))
+	binary.BigEndian.PutUint16(buf[0x50:], 0x0200) // Debug_0
+	binary.BigEndian.PutUint16(buf[0x52:], DrmTypePS4)
+	binary.BigEndian.PutUint16(buf[0x54:], ContentTypeGD)
+	binary.BigEndian.PutUint16(buf[0x56:], 3) // Required by ShellCore for GD.
+	binary.BigEndian.PutUint32(buf[0x64:], 1)
+
+	paddedID := make([]byte, 48)
+	copy(paddedID, []byte(contentID))
+	secretSeed := Sha256(paddedID)
+	secretIV := secretSeed[:16]
+	secret := make([]byte, 144)
+	copy(secret[:16], secretSeed[16:])
+	secret = AES128CBCEncrypt(secret, rifDebugKey, secretIV)
+	copy(buf[0x260:], secretIV)
+	copy(buf[0x270:], secret)
+
+	signature, err := RSA2048SignSha256(Sha256(buf[:0x300]), &debugRifKeyset)
+	if err != nil {
+		return nil, fmt.Errorf("fpkg: sign debug RIF: %w", err)
+	}
+	copy(buf[0x300:], signature)
+	return buf, nil
+}
+
+func buildLicenseInfo(contentID string) []byte {
 	buf := make([]byte, 0x200)
-	copy(buf[0:4], []byte{0x00, 0x00, 0x00, 0x01})
-	copy(buf[4:8], []byte{0x00, 0x00, 0x00, 0x00})
-	copy(buf[8:], contentID)
+	copy(buf[0x00:], []byte(contentID))
+	binary.BigEndian.PutUint32(buf[0x40:], 0)
+	binary.BigEndian.PutUint32(buf[0x44:], ContentTypeGD)
+	binary.BigEndian.PutUint32(buf[0x48:], 0)
+	binary.BigEndian.PutUint32(buf[0x4C:], 1)
 	return buf
+}
+
+func buildPubToolInfo(packageSize uint64) string {
+	img0SizeMiB := (packageSize + 0xFFFFF) / (1024 * 1024)
+	return fmt.Sprintf(
+		"c_date=%s,sdk_ver=05050000,st_type=digital50,img0_l0_size=%d,img0_l1_size=0,img0_sc_ksize=512,img0_pc_ksize=576",
+		time.Now().UTC().Format("20060102"),
+		img0SizeMiB,
+	)
+}
+
+func defaultPlayGoManifest() []byte {
+	manifest := "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\r\n" +
+		"<psproject fmt=\"playgo-manifest\" version=\"0990\">\r\n" +
+		"  <volume>\r\n" +
+		"    <chunk_info chunk_count=\"1\" scenario_count=\"1\">\r\n" +
+		"      <scenarios default_id=\"0\">\r\n" +
+		"        <scenario id=\"0\" type=\"sp\" initial_chunk_count=\"1\" label=\"Scenario #0\">0</scenario>\r\n" +
+		"      </scenarios>\r\n" +
+		"    </chunk_info>\r\n" +
+		"  </volume>\r\n" +
+		"</psproject>\r\n"
+	return append([]byte{0xEF, 0xBB, 0xBF}, []byte(manifest)...)
+}
+
+func buildPlayGoChunkDat(contentID string, packageSize, innerPFSSize uint64) []byte {
+	buf := make([]byte, 416)
+	binary.LittleEndian.PutUint32(buf[0x00:], 0x6f676c70) // "plgo"
+	binary.LittleEndian.PutUint16(buf[0x08:], 1)          // image_count
+	binary.LittleEndian.PutUint16(buf[0x0A:], 1)          // chunk_count
+	binary.LittleEndian.PutUint16(buf[0x0C:], 1)          // mchunk_count
+	binary.LittleEndian.PutUint16(buf[0x0E:], 1)          // scenario_count
+	binary.LittleEndian.PutUint32(buf[0x10:], uint32(len(buf)))
+	binary.LittleEndian.PutUint16(buf[0x16:], 1) // attrib
+	for i := 0x20; i < 0x40; i++ {
+		buf[i] = 0xFF
+	}
+	copy(buf[0x40:], []byte(contentID))
+
+	table := []struct {
+		offset uint32
+		size   uint32
+	}{
+		{0x100, 0x20},
+		{0x120, 0x02},
+		{0x130, 0x09},
+		{0x140, 0x10},
+		{0x160, 0x20},
+		{0x180, 0x02},
+		{0x190, 0x0C},
+		{0x150, 0x10},
+	}
+	for i, item := range table {
+		base := 0xC0 + i*8
+		binary.LittleEndian.PutUint32(buf[base:], item.offset)
+		binary.LittleEndian.PutUint32(buf[base+4:], item.size)
+	}
+
+	buf[0x100] = 0x80
+	buf[0x102] = 0x03
+	binary.LittleEndian.PutUint16(buf[0x10E:], 1)
+	binary.LittleEndian.PutUint64(buf[0x110:], 0xFFFFFFFFFFFFFFFF)
+	copy(buf[0x130:], []byte("Chunk #0"))
+
+	binary.LittleEndian.PutUint64(buf[0x140:], 0)
+	binary.LittleEndian.PutUint64(buf[0x148:], packageSize)
+	binary.LittleEndian.PutUint64(buf[0x150:], 0)
+	binary.LittleEndian.PutUint64(buf[0x158:], innerPFSSize)
+
+	buf[0x160] = 1
+	binary.LittleEndian.PutUint16(buf[0x174:], 1)
+	binary.LittleEndian.PutUint16(buf[0x176:], 1)
+	copy(buf[0x190:], []byte("Scenario #0"))
+	return buf
+}
+
+func updatePlayGoChunkShaSize(entries []*pkgEntry, bodyOffset, pfsSize uint64) {
+	chunkSha := findEntry(entries, EntryIDPlayGoChunkSha)
+	if chunkSha == nil {
+		return
+	}
+
+	size := uint32(0)
+	for {
+		chunkSha.data = make([]byte, size)
+		packageSize := estimatePackageSizeFromEntries(entries, bodyOffset, pfsSize)
+		nextSize := uint32(packageSize/0x10000) * 4
+		if nextSize == size {
+			return
+		}
+		size = nextSize
+	}
+}
+
+func estimatePackageSizeFromEntries(entries []*pkgEntry, bodyOffset, pfsSize uint64) uint64 {
+	dataOffset := bodyOffset
+	for _, e := range entries {
+		size := entryDataSizeForLayout(e, len(entries))
+		dataOffset += align64(uint64(size), 16)
+	}
+	bodySize := align64(dataOffset, 0x80000) - bodyOffset
+	return bodyOffset + bodySize + pfsSize
+}
+
+func entryDataSizeForLayout(e *pkgEntry, entryCount int) uint32 {
+	switch e.id {
+	case EntryIDMetas, EntryIDDigests:
+		return uint32(entryCount) * 32
+	default:
+		return uint32(len(e.data))
+	}
+}
+
+func writePlayGoChunkSha(pkg []byte, entries []*pkgEntry, pfsImageOffset, packageSize uint64) error {
+	chunkSha := findEntry(entries, EntryIDPlayGoChunkSha)
+	if chunkSha == nil {
+		return nil
+	}
+
+	data := make([]byte, chunkSha.dataSize)
+	startChunk := pfsImageOffset / 0x10000
+	totalChunks := packageSize / 0x10000
+	for chunk := startChunk; chunk < totalChunks; chunk++ {
+		offset := chunk * 0x10000
+		end := offset + 0x10000
+		if end > uint64(len(pkg)) {
+			return fmt.Errorf("fpkg: PlayGo chunk %d exceeds package size", chunk)
+		}
+		outOffset := chunk * 4
+		if outOffset+4 > uint64(len(data)) {
+			return fmt.Errorf("fpkg: PlayGo SHA table too small for chunk %d", chunk)
+		}
+		hash := Sha256(pkg[offset:end])
+		copy(data[outOffset:outOffset+4], hash[:4])
+	}
+
+	chunkSha.data = data
+	copy(pkg[chunkSha.dataOffset:chunkSha.dataOffset+chunkSha.dataSize], data)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
 // Entry encryption
 // ---------------------------------------------------------------------------
 
-func writeEncryptedEntry(w io.Writer, e *pkgEntry, contentID, passcode string) {
+func writeEncryptedEntry(w io.Writer, e *pkgEntry, contentID, passcode string) error {
+	if len(e.data)%16 != 0 {
+		return fmt.Errorf("fpkg: encrypted entry %q size %d is not 16-byte aligned", e.name, len(e.data))
+	}
+
 	// Build meta bytes (32 bytes, big-endian) for IV derivation
 	metaBytes := make([]byte, 32)
 	mw := newBytesWriteSeeker(metaBytes)
@@ -617,44 +894,126 @@ func writeEncryptedEntry(w io.Writer, e *pkgEntry, contentID, passcode string) {
 	iv := ivKey[0:16]
 	key := ivKey[16:32]
 
-	encrypted := AES128CBCEncryptPad(e.data, key, iv)
+	encrypted := AES128CBCEncrypt(e.data, key, iv)
 	w.Write(encrypted)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
 // Digest calculation
 // ---------------------------------------------------------------------------
 
-func calculateDigests(pkg []byte, entries []*pkgEntry, bodyOffset, bodySize, pfsImageOffset, pfsSize uint64) {
+func calculateDigests(pkg []byte, entries []*pkgEntry, contentID string, sfo *ParamSfo, bodyOffset, bodySize, pfsImageOffset, pfsSize uint64) {
 	// PFS image digests
 	pfsSignedDigest := Sha256(pkg[pfsImageOffset : pfsImageOffset+0x10000])
 	copy(pkg[0x460:], pfsSignedDigest)
 	pfsImageDigest := Sha256(pkg[pfsImageOffset : pfsImageOffset+pfsSize])
 	copy(pkg[0x440:], pfsImageDigest)
 
+	sortedEntries := sortedEntriesByID(entries)
+
+	if generalEntry := findEntry(entries, EntryIDGeneralDigests); generalEntry != nil {
+		paramEntry := findEntry(entries, EntryIDParamSfo)
+		if paramEntry != nil {
+			paramData := pkg[paramEntry.dataOffset : paramEntry.dataOffset+paramEntry.dataSize]
+			generalData := buildGeneralDigests(pkg, contentID, sfo, paramData, pfsImageDigest)
+			copy(pkg[generalEntry.dataOffset:generalEntry.dataOffset+generalEntry.dataSize], generalData)
+			generalEntry.data = generalData
+		}
+	}
+
+	// Entry digest table. Entry 0 is the digest table itself and remains zero;
+	// all other slots follow the sorted METAS order.
+	digestEntry := findEntry(entries, EntryIDDigests)
+	if digestEntry != nil {
+		digestData := make([]byte, len(sortedEntries)*pkgHashSize)
+		for i := 1; i < len(sortedEntries); i++ {
+			e := sortedEntries[i]
+			hash := Sha256(pkg[e.dataOffset : e.dataOffset+e.dataSize])
+			copy(digestData[i*pkgHashSize:(i+1)*pkgHashSize], hash)
+		}
+		copy(pkg[digestEntry.dataOffset:digestEntry.dataOffset+digestEntry.dataSize], digestData)
+		digestEntry.data = digestData
+		copy(pkg[0x140:], Sha256(digestData))
+	}
+
 	// Body digest
 	bodyDigest := Sha256(pkg[bodyOffset : bodyOffset+bodySize])
 	copy(pkg[0x160:], bodyDigest)
 
-	// Digest table hash (hash of the digests entry data)
-	for _, e := range entries {
-		if e.id == EntryIDDigests {
-			digestTableHash := Sha256(e.data)
-			copy(pkg[0x140:], digestTableHash)
-		}
+	if scEntries1 := concatEntryData(pkg, entries, []uint32{
+		EntryIDEntryKeys,
+		EntryIDImageKey,
+		EntryIDGeneralDigests,
+		EntryIDMetas,
+		EntryIDDigests,
+	}, false); len(scEntries1) > 0 {
+		copy(pkg[0x100:], Sha256(scEntries1))
+	}
+
+	if scEntries2 := concatEntryData(pkg, entries, []uint32{
+		EntryIDEntryKeys,
+		EntryIDImageKey,
+		EntryIDGeneralDigests,
+		EntryIDMetas,
+	}, true); len(scEntries2) > 0 {
+		copy(pkg[0x120:], Sha256(scEntries2))
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Utility
-// ---------------------------------------------------------------------------
+const (
+	generalDigestContent    uint32 = 1 << 1
+	generalDigestGame       uint32 = 1 << 2
+	generalDigestHeader     uint32 = 1 << 3
+	generalDigestMajorParam uint32 = 1 << 5
+	generalDigestParam      uint32 = 1 << 6
+)
 
-func align64(v, align uint64) uint64 {
-	rem := v % align
-	if rem != 0 {
-		v += align - rem
+func buildGeneralDigests(pkg []byte, contentID string, sfo *ParamSfo, paramData, pfsImageDigest []byte) []byte {
+	data := make([]byte, 0x180)
+	binary.BigEndian.PutUint16(data[0x00:], 0xD256)
+	binary.BigEndian.PutUint16(data[0x02:], 0x0100)
+	binary.BigEndian.PutUint32(data[0x1C:], generalDigestContent|generalDigestGame|generalDigestHeader|generalDigestMajorParam|generalDigestParam)
+
+	majorParamDigest := computeMajorParamDigest(sfo)
+	copy(data[0x20:], computeContentDigest(contentID, pfsImageDigest, majorParamDigest))
+	copy(data[0x40:], pfsImageDigest)
+	copy(data[0x60:], computeHeaderDigest(pkg))
+	copy(data[0xA0:], majorParamDigest)
+	copy(data[0xC0:], Sha256(paramData))
+	return data
+}
+
+func computeContentDigest(contentID string, pfsImageDigest, majorParamDigest []byte) []byte {
+	buf := make([]byte, 0, 36+12+4+4+32+32)
+	buf = append(buf, []byte(contentID)...)
+	buf = append(buf, make([]byte, 12)...)
+	var tmp [4]byte
+	binary.BigEndian.PutUint32(tmp[:], DrmTypePS4)
+	buf = append(buf, tmp[:]...)
+	binary.BigEndian.PutUint32(tmp[:], ContentTypeGD)
+	buf = append(buf, tmp[:]...)
+	buf = append(buf, pfsImageDigest...)
+	buf = append(buf, majorParamDigest...)
+	return Sha256(buf)
+}
+
+func computeHeaderDigest(pkg []byte) []byte {
+	buf := make([]byte, 0, 64+128)
+	buf = append(buf, pkg[0:64]...)
+	buf = append(buf, pkg[0x400:0x480]...)
+	return Sha256(buf)
+}
+
+func computeMajorParamDigest(sfo *ParamSfo) []byte {
+	majorParam := "ATTRIBUTE" + sfo.digestString("ATTRIBUTE")
+	if sfo.Get("ATTRIBUTE2") != nil {
+		majorParam += "ATTRIBUTE2" + sfo.digestString("ATTRIBUTE2")
 	}
-	return v
+	majorParam += "CATEGORY" + sfo.digestString("CATEGORY")
+	majorParam += "FORMAT" + sfo.digestString("FORMAT")
+	majorParam += "PUBTOOLVER" + sfo.digestString("PUBTOOLVER")
+	return Sha256([]byte(majorParam))
 }
 
 func padTo(data []byte, size int) []byte {
@@ -666,6 +1025,30 @@ func padTo(data []byte, size int) []byte {
 	return result
 }
 
+func align64(v, align uint64) uint64 {
+	rem := v % align
+	if rem != 0 {
+		v += align - rem
+	}
+	return v
+}
+
+// isInnerPFSSysExclusion returns true for sce_sys files that are emitted as
+// PKG body entries and therefore excluded from the inner PFS.
+// The PS4 installer copies PKG body entries to /app0/sce_sys/ at install time.
+// Files like keystone and about/right.sprx stay because they have no PKG body entry.
+func isInnerPFSSysExclusion(path string) bool {
+	if len(path) < 8 || path[:8] != "sce_sys/" {
+		return false
+	}
+	name := path[8:]
+	switch name {
+	case "param.sfo", "icon0.png", "pic1.png", "save_data.png":
+		return true
+	}
+	return false
+}
+
 func sortMetas(metas []metaEntry) {
 	for i := 0; i < len(metas)-1; i++ {
 		for j := i + 1; j < len(metas); j++ {
@@ -674,6 +1057,55 @@ func sortMetas(metas []metaEntry) {
 			}
 		}
 	}
+}
+
+func sortedEntriesByID(entries []*pkgEntry) []*pkgEntry {
+	sortedEntries := append([]*pkgEntry(nil), entries...)
+	sort.Slice(sortedEntries, func(i, j int) bool {
+		return sortedEntries[i].id < sortedEntries[j].id
+	})
+	return sortedEntries
+}
+
+func findEntry(entries []*pkgEntry, id uint32) *pkgEntry {
+	for _, e := range entries {
+		if e.id == id {
+			return e
+		}
+	}
+	return nil
+}
+
+func calcMainEntryDataSize(entries []*pkgEntry) uint32 {
+	var size uint32
+	for _, id := range []uint32{
+		EntryIDEntryKeys,
+		EntryIDImageKey,
+		EntryIDGeneralDigests,
+		EntryIDMetas,
+		EntryIDDigests,
+	} {
+		if e := findEntry(entries, id); e != nil {
+			size += e.dataSize
+		}
+	}
+	return size
+}
+
+func concatEntryData(pkg []byte, entries []*pkgEntry, ids []uint32, sc2MetasSize bool) []byte {
+	var out []byte
+	for _, id := range ids {
+		e := findEntry(entries, id)
+		if e == nil {
+			return nil
+		}
+		size := e.dataSize
+		if sc2MetasSize && id == EntryIDMetas {
+			size = 6 * 0x20
+		}
+		out = append(out, pkg[e.dataOffset:e.dataOffset+size]...)
+	}
+	return out
 }
 
 // Big-endian write helpers for PKG (which uses BE for header).
