@@ -53,6 +53,7 @@ var requiredBundledAssetPaths = []string{
 	"emus/ps1hd/package-ps4.conf",
 	"emus/ps1hd/sce_discmap.plt",
 	"emus/ps1hd/sce_sys/about/right.sprx",
+	"emus/ps1hd/sce_sys/pic1.png",
 	"emus/Jak v2/eboot.bin",
 	"emus/Jak v2/sce_module/libc.prx",
 	"emus/Jak v2/sce_module/libSceFios2.prx",

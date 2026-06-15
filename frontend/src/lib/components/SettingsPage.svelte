@@ -228,8 +228,4 @@
     opacity: 0.7;
   }
 
-  .hint.warning {
-    color: var(--warning, #e6a23c);
-    opacity: 1;
-  }
 </style>

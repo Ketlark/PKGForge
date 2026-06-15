@@ -121,6 +121,10 @@ func TestPS1EmuConfigIncludesRuntimeImageAndKnownFlags(t *testing.T) {
 		"--ps4-trophies=0",
 		"--ps5-uds=0",
 		"--trophies=0",
+		"--has-shown-start-select-help=0",
+		"--ps1-title-id=SCES02752",
+		"--title-id=SCES02752",
+		`--region="SCEE"`,
 		`--image="data/disc1.bin"`,
 		`--image="data/disc2.bin"`,
 		`--image0="data/disc1.bin"`,
@@ -146,6 +150,7 @@ func TestPS1EmuConfigPreservesTemplatePrefixAndRootBiosFallback(t *testing.T) {
 
 --sim-analog-pad=0x2020
 --bios-hide-sce-osd=1
+--has-shown-start-select-help=1
 --pace-gpu-dma=true
 
 # following settings are machine-generated
@@ -160,7 +165,11 @@ func TestPS1EmuConfigPreservesTemplatePrefixAndRootBiosFallback(t *testing.T) {
 		"# Syphon Filter (all regions)",
 		"--sim-analog-pad=0x2020",
 		"--bios-hide-sce-osd=1",
+		"--has-shown-start-select-help=1",
 		"--pace-gpu-dma=true",
+		"--ps1-title-id=SLUS00558",
+		"--title-id=SLUS00558",
+		`--region="SCEA"`,
 		`--image="data/disc1.bin"`,
 		`--bios-dir="bios"`,
 	} {
@@ -170,6 +179,27 @@ func TestPS1EmuConfigPreservesTemplatePrefixAndRootBiosFallback(t *testing.T) {
 	}
 	if strings.Contains(cfg, `--image="data/game.bin"`) {
 		t.Fatalf("config should replace stale template image:\n%s", cfg)
+	}
+	if strings.Contains(cfg, "--has-shown-start-select-help=0") {
+		t.Fatalf("config should preserve template start/select help state:\n%s", cfg)
+	}
+}
+
+func TestEnsurePS1LaunchBackgroundMirrorsPic1AndPic0(t *testing.T) {
+	files := map[string][]byte{
+		"sce_sys/pic1.png": []byte("official-background"),
+	}
+	ensurePS1LaunchBackground(files, "SLUS-00558")
+	if string(files["sce_sys/pic0.png"]) != "official-background" {
+		t.Fatalf("pic0 was not mirrored from pic1")
+	}
+
+	files = map[string][]byte{
+		"sce_sys/pic0.png": []byte("launcher-background"),
+	}
+	ensurePS1LaunchBackground(files, "SLUS-00558")
+	if string(files["sce_sys/pic1.png"]) != "launcher-background" {
+		t.Fatalf("pic1 was not mirrored from pic0")
 	}
 }
 

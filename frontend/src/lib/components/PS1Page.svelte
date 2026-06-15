@@ -8,7 +8,6 @@
     ps1TitleID,
     ps1Icon0,
     ps1Pic1,
-    ps1Emulator,
     ps1AnalogSticks,
     ps1SkipBootLogo,
     ps1Force60Hz,
@@ -147,14 +146,6 @@
     <!-- Emulator options -->
     <div class="section">
       <h3>{$t('ps1.emulator')}</h3>
-      <div class="form-grid">
-        <label class="form-label" for="ps1-emu">{$t('ps1.emulatorType')}</label>
-        <select id="ps1-emu" class="form-select" bind:value={$ps1Emulator} disabled={$ps1Running}>
-          <option value="ps1_emu">PS1 Emu (default)</option>
-          <option value="ps1_netemu">PS1 Net Emu (PS Plus)</option>
-        </select>
-      </div>
-
       <div class="checkbox-grid">
         <label class="checkbox-label">
           <input type="checkbox" bind:checked={$ps1AnalogSticks} disabled={$ps1Running} />

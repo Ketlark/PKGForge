@@ -57,7 +57,7 @@ PS1 packages include PCSX-Redux OpenBIOS as a redistributable BIOS fallback for 
 
 Runtime emulator files are bundled with the app by default. The emulator directory setting is an override for development or diagnostics, not a normal requirement for creating PS1/PS2 fPKGs.
 
-If no icon or background image is supplied or found automatically, PKG Forge generates fallback `icon0.png`, `save_data.png`, and `pic1.png` files so required `sce_sys` artwork is still present.
+If no icon or background image is supplied or found automatically, PKG Forge uses bundled emulator artwork or generates fallback `icon0.png`, `save_data.png`, `pic1.png`, and PS1 `pic0.png` files so required `sce_sys` artwork is still present.
 
 The fPKG builder is native Go and follows LibOrbisPkg layout rules for PKG entries, PlayGo metadata, Debug RIF, and signed/encrypted outer PFS images. Tests compare generated package entry layout and sizes against PkgTool.Core output for regression coverage.
 

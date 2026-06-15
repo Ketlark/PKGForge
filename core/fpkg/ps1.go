@@ -287,12 +287,18 @@ func ps1ModernEmuConfig(opts PS1FPKGOptions, titleID string, discCount int, cfg 
 	if cfg.HideSceOSD && !ps1ConfigHasKey(prefix, "--bios-hide-sce-osd") {
 		prefix = append(prefix, "--bios-hide-sce-osd=1")
 	}
+	if !ps1ConfigHasKey(prefix, "--has-shown-start-select-help") {
+		prefix = append(prefix, "--has-shown-start-select-help=0")
+	}
 	if opts.AnalogSticks && !ps1ConfigHasKey(prefix, "--sim-analog-pad") {
 		prefix = append(prefix, "--sim-analog-pad=0x2020")
 	}
 
 	lines := append([]string{}, prefix...)
 	lines = append(lines, "", "# following settings are machine-generated")
+	lines = ps1AppendGeneratedConfigLine(lines, prefix, fmt.Sprintf("--ps1-title-id=%s", normalizeTitleID(titleID)))
+	lines = ps1AppendGeneratedConfigLine(lines, prefix, fmt.Sprintf("--title-id=%s", normalizeTitleID(titleID)))
+	lines = ps1AppendGeneratedConfigLine(lines, prefix, fmt.Sprintf("--region=\"%s\"", ps1HDRegion(titleID)))
 
 	for i := 0; i < discCount; i++ {
 		lines = append(lines, fmt.Sprintf("--image=\"%s\"", ps1DataBinPath(i+1)))
@@ -319,6 +325,14 @@ func ps1ModernEmuConfig(opts PS1FPKGOptions, titleID string, discCount int, cfg 
 	}
 
 	return strings.Join(lines, "\n") + "\n"
+}
+
+func ps1AppendGeneratedConfigLine(lines, prefix []string, line string) []string {
+	key := ps1ConfigKey(line)
+	if ps1ConfigHasKey(prefix, key) || ps1ConfigHasKey(lines, key) {
+		return lines
+	}
+	return append(lines, line)
 }
 
 func ps1SIEAEmuConfig(opts PS1FPKGOptions, discCount int, cfg ps1EmuConfigOptions) string {
@@ -354,6 +368,9 @@ func ps1SIEAEmuConfig(opts PS1FPKGOptions, discCount int, cfg ps1EmuConfigOption
 				prefix = append(prefix, required)
 			}
 		}
+	}
+	if !ps1ConfigHasKey(prefix, "--has-shown-start-select-help") {
+		prefix = append(prefix, "--has-shown-start-select-help=0")
 	}
 
 	lines := append([]string{}, prefix...)
@@ -514,6 +531,28 @@ func ps1HasAnyFile(files map[string][]byte, paths ...string) bool {
 	return false
 }
 
+func setPS1LaunchBackground(files map[string][]byte, data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	files["sce_sys/pic1.png"] = data
+	files["sce_sys/pic0.png"] = data
+}
+
+func ensurePS1LaunchBackground(files map[string][]byte, titleID string) {
+	if pic1 := files["sce_sys/pic1.png"]; len(pic1) > 0 {
+		if len(files["sce_sys/pic0.png"]) == 0 {
+			files["sce_sys/pic0.png"] = pic1
+		}
+		return
+	}
+	if pic0 := files["sce_sys/pic0.png"]; len(pic0) > 0 {
+		files["sce_sys/pic1.png"] = pic0
+		return
+	}
+	setPS1LaunchBackground(files, defaultPic1PNG(titleID))
+}
+
 func ps1HasGlobalGameData(files map[string][]byte) bool {
 	for path := range files {
 		if strings.HasPrefix(path, "global/") {
@@ -646,9 +685,8 @@ func BuildPS1Project(opts PS1FPKGOptions) (map[string][]byte, *PS1DiscResult, er
 		}
 	}
 	if opts.Pic1 != "" {
-		data, err := os.ReadFile(opts.Pic1)
-		if err == nil {
-			files["sce_sys/pic1.png"] = data
+		if data, err := os.ReadFile(opts.Pic1); err == nil {
+			setPS1LaunchBackground(files, data)
 		}
 	}
 
@@ -691,6 +729,19 @@ func BuildPS1Project(opts PS1FPKGOptions) (map[string][]byte, *PS1DiscResult, er
 			}
 		}
 	}
+	if opts.Pic1 == "" {
+		if backgroundPath, err := ResolvePS1Background(opts.CuePath, titleID); err == nil {
+			if data, err := os.ReadFile(backgroundPath); err == nil {
+				setPS1LaunchBackground(files, data)
+			}
+		}
+	}
+	if len(files["sce_sys/pic1.png"]) == 0 && iconPath != "" {
+		if data, err := ps1BackgroundFromImagePath(iconPath, titleID); err == nil {
+			setPS1LaunchBackground(files, data)
+		}
+	}
+	ensurePS1LaunchBackground(files, titleID)
 
 	discCount := 1 + len(opts.ExtraDiscs)
 	runtimeProfile := resolvePS1RuntimeProfile(opts, files)

@@ -88,7 +88,7 @@ The `sce_sys/param.sfo` file available inside `/app0` at launch. It duplicates t
 _Avoid_: treating the PKG body `PARAM_SFO` entry as sufficient for runtime file lookups.
 
 **Runtime artwork**:
-The `sce_sys/icon0.png`, `sce_sys/save_data.png`, and `sce_sys/pic1.png` files available inside `/app0` and also emitted as PKG body entries when applicable. They come from user inputs or automatic cover lookup first where applicable, then deterministic fallback PNGs.
+The `sce_sys/icon0.png`, `sce_sys/save_data.png`, `sce_sys/pic1.png`, and PS1 `sce_sys/pic0.png` files available inside `/app0` and also emitted as PKG body entries when applicable. They come from user inputs, local game artwork, automatic cover lookup, bundled emulator defaults, then deterministic fallback PNGs.
 _Avoid_: depending on network cover lookup for required `sce_sys` artwork.
 
 **Bundled emulator assets**:

@@ -20,7 +20,6 @@ export const ps1Title = writable('');
 export const ps1TitleID = writable('');
 export const ps1Icon0 = writable('');
 export const ps1Pic1 = writable('');
-export const ps1Emulator = writable('ps1_emu');
 export const ps1AnalogSticks = writable(false);
 export const ps1SkipBootLogo = writable(false);
 export const ps1Force60Hz = writable(false);
@@ -195,7 +194,7 @@ export async function startPS1FPKG() {
       titleID: get(ps1TitleID),
       icon0: get(ps1Icon0),
       pic1: get(ps1Pic1),
-      emulator: get(ps1Emulator),
+      emulator: 'ps1_emu',
       analogSticks: get(ps1AnalogSticks),
       skipBootLogo: get(ps1SkipBootLogo),
       force60Hz: get(ps1Force60Hz),

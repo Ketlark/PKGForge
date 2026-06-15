@@ -72,10 +72,10 @@ The fPKG writer follows LibOrbisPkg behavior, then uses PkgTool.Core as a valida
 ### Package body
 
 - `sce_sys/param.sfo` is both a PKG body entry for install metadata and an inner PFS file for `/app0/sce_sys/param.sfo` runtime access.
-- `sce_sys/icon0.png`, `sce_sys/save_data.png`, and `sce_sys/pic1.png` are always present. User or cover art inputs take precedence where applicable; otherwise PKG Forge generates deterministic fallback PNGs.
+- `sce_sys/icon0.png`, `sce_sys/save_data.png`, `sce_sys/pic1.png`, and `sce_sys/pic0.png` are always present for PS1 launch/runtime artwork. User or local game art inputs take precedence where applicable; otherwise bundled emulator artwork or deterministic fallback PNGs are used.
 - Base PS1/PS2 fPKGs use `APP_TYPE=1` in `param.sfo` ("Paid standalone full app"). `APP_TYPE=4` is "Freemium app" and can trigger `CE-39929-2` at launch.
 - PS1HD runtime modules are loaded from `/app0/sce_module/`; `libc.prx`, `libSceFios2.prx`, and `libSceNpToolkit2.prx` must not be placed at `/app0`.
-- PS1HD reads `config-title.txt` and requires an `--image` setting that points to the packaged disc image, e.g. `--image="data/disc1.bin"`.
+- PS1HD reads `config-title.txt` and requires an `--image` setting that points to the packaged disc image, e.g. `--image="data/disc1.bin"`. PKG Forge also writes `--ps1-title-id`, `--title-id`, `--region`, and `--has-shown-start-select-help=0` unless a template already provides those keys.
 - PS1HD also loads a BIOS from `/app0/bios/`; PKG Forge bundles PCSX-Redux OpenBIOS under the `SCPH5500.bin`, `SCPH5501.bin`, and `SCPH5502.bin` filenames and sets `--bios-dir="bios"`.
 - Do not emit `--bios-hide-sce-osd=1` while using bundled OpenBIOS. It is a Sony BIOS startup-logo patch and can target the wrong ROM instructions against OpenBIOS.
 - PS1 discs are packaged under `/app0/data/` as `discN.bin`, a rewritten `discN.cue`, and a Cue2toc-format `discN.toc`.
