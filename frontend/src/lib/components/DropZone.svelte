@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
+  import { OnFileDrop, OnFileDropOff } from '../../../wailsjs/runtime/runtime';
 
   export let label = 'Drop files here';
   export let subtitle = 'or click to browse';
@@ -12,6 +13,32 @@
 
   let dragging = false;
   let fileInput: HTMLInputElement;
+  let dropTarget: HTMLDivElement;
+
+  onMount(() => {
+    if (typeof window === 'undefined' || !(window as any).runtime?.OnFileDrop) {
+      return;
+    }
+
+    // Wails native drag and drop is needed for real filesystem paths.
+    OnFileDrop((x: number, y: number, paths: string[]) => {
+      dragging = false;
+      if (disabled || !paths || paths.length === 0) return;
+
+      if (dropTarget) {
+        const rect = dropTarget.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          dispatch('files', paths);
+        }
+      }
+    }, false);
+
+    return () => {
+      if ((window as any).runtime?.OnFileDropOff) {
+        OnFileDropOff();
+      }
+    };
+  });
 
   function handleDragOver(e: DragEvent) {
     if (disabled) return;
@@ -23,6 +50,7 @@
     dragging = false;
   }
 
+  // Fallback: handle browser drop (works in dev mode / some environments)
   function handleDrop(e: DragEvent) {
     e.preventDefault();
     dragging = false;
@@ -64,6 +92,7 @@
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
+  bind:this={dropTarget}
   class="drop-zone"
   class:dragging
   class:disabled
@@ -95,6 +124,7 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
+    min-height: 128px;
     padding: 28px 20px;
     border: 2px dashed var(--border);
     border-radius: var(--radius-lg);
@@ -102,6 +132,7 @@
     cursor: pointer;
     transition: all 0.2s ease;
     user-select: none;
+    --wails-drop-target: drop;
   }
 
   .drop-zone:hover:not(.disabled) {
@@ -129,11 +160,17 @@
     font-size: 14px;
     font-weight: 600;
     color: var(--text-primary);
+    text-align: center;
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
 
   .drop-subtitle {
     font-size: 12px;
     color: var(--text-muted);
+    text-align: center;
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
 
   .hidden-input {

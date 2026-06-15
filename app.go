@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"pkg-forge/core"
 	"pkg-forge/core/fpkg"
@@ -35,6 +38,15 @@ type FileInfo struct {
 	Dir  string `json:"dir"`
 }
 
+type FPKGProgress struct {
+	Percentage     float64 `json:"percentage"`
+	Phase          string  `json:"phase"`
+	BytesProcessed int64   `json:"bytesProcessed"`
+	TotalBytes     int64   `json:"totalBytes"`
+	SpeedBPS       float64 `json:"speedBPS"`
+	ETASeconds     float64 `json:"etaSeconds"`
+}
+
 // App bridges the Svelte frontend with the core logic via Wails bindings.
 type App struct {
 	ctx context.Context
@@ -49,6 +61,101 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+func resolveCompanionCue(binPath string) (string, error) {
+	ext := filepath.Ext(binPath)
+	if strings.ToLower(ext) != ".bin" {
+		return binPath, nil
+	}
+
+	base := strings.TrimSuffix(binPath, ext)
+	for _, candidate := range []string{base + ".cue", base + ".CUE"} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	return "", fmt.Errorf("no .cue file found for %s; please provide the .cue file instead", filepath.Base(binPath))
+}
+
+func estimateDiscBytes(paths []string) int64 {
+	seen := make(map[string]bool)
+	var total int64
+
+	addFile := func(path string) {
+		if path == "" || seen[path] {
+			return
+		}
+		seen[path] = true
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			total += info.Size()
+		}
+	}
+
+	for _, path := range paths {
+		ext := strings.ToLower(filepath.Ext(path))
+		switch ext {
+		case ".cue":
+			tracks, err := fpkg.ParseCUE(path)
+			if err != nil {
+				addFile(path)
+				continue
+			}
+			for _, track := range tracks {
+				addFile(track.File)
+			}
+		case ".bin":
+			cuePath, err := resolveCompanionCue(path)
+			if err != nil {
+				addFile(path)
+				continue
+			}
+			tracks, err := fpkg.ParseCUE(cuePath)
+			if err != nil {
+				addFile(path)
+				continue
+			}
+			for _, track := range tracks {
+				addFile(track.File)
+			}
+		default:
+			addFile(path)
+		}
+	}
+
+	return total
+}
+
+func (a *App) emitFPKGProgress(start time.Time, totalBytes int64, percent float64, phase string) {
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+
+	var bytesProcessed int64
+	var speedBPS, etaSeconds float64
+	if totalBytes > 0 {
+		bytesProcessed = int64(float64(totalBytes) * percent / 100)
+		if bytesProcessed > totalBytes {
+			bytesProcessed = totalBytes
+		}
+		speedBPS, etaSeconds = core.SpeedETA(bytesProcessed, totalBytes, start)
+	} else if percent > 0 && percent < 100 {
+		elapsed := time.Since(start).Seconds()
+		etaSeconds = elapsed * (100 - percent) / percent
+	}
+
+	runtime.EventsEmit(a.ctx, "fpkg-progress", FPKGProgress{
+		Percentage:     percent,
+		Phase:          phase,
+		BytesProcessed: bytesProcessed,
+		TotalBytes:     totalBytes,
+		SpeedBPS:       speedBPS,
+		ETASeconds:     etaSeconds,
+	})
 }
 
 // acquireCancel creates a per-operation cancel channel keyed by operation type,
@@ -158,14 +265,14 @@ func (a *App) RenamePKG(path string) (string, error) {
 
 // --- Config ---
 
-func (a *App) LoadConfig() core.Config  { return core.LoadConfig() }
+func (a *App) LoadConfig() core.Config          { return core.LoadConfig() }
 func (a *App) SaveConfig(cfg core.Config) error { return core.SaveConfig(cfg) }
 
 // --- History ---
 
-func (a *App) GetHistory() []core.HistoryEntry       { return core.LoadHistory() }
+func (a *App) GetHistory() []core.HistoryEntry               { return core.LoadHistory() }
 func (a *App) AddHistoryEntry(entry core.HistoryEntry) error { return core.AddHistory(entry) }
-func (a *App) ClearHistory() error                    { return core.ClearHistory() }
+func (a *App) ClearHistory() error                           { return core.ClearHistory() }
 
 // --- Options ---
 
@@ -180,35 +287,48 @@ func (a *App) FormatSize(b int64) string   { return core.FormatSize(b) }
 
 // PS1FPKGRequest is the frontend request struct for PS1 fPKG creation.
 type PS1FPKGRequest struct {
-	CuePath       string   `json:"cuePath"`
-	ExtraDiscs    []string `json:"extraDiscs"`
-	OutputPath    string   `json:"outputPath"`
-	Title         string   `json:"title"`
-	TitleID       string   `json:"titleID"`
-	Icon0         string   `json:"icon0"`
-	Pic1          string   `json:"pic1"`
-	Emulator      string   `json:"emulator"`
-	AnalogSticks  bool     `json:"analogSticks"`
-	SkipBootLogo  bool     `json:"skipBootLogo"`
-	Force60Hz     bool     `json:"force60Hz"`
-	EnableCDDATOC bool     `json:"enableCddaToc"`
+	CuePath        string   `json:"cuePath"`
+	ExtraDiscs     []string `json:"extraDiscs"`
+	OutputPath     string   `json:"outputPath"`
+	Title          string   `json:"title"`
+	TitleID        string   `json:"titleID"`
+	Icon0          string   `json:"icon0"`
+	Pic1           string   `json:"pic1"`
+	Emulator       string   `json:"emulator"`
+	AnalogSticks   bool     `json:"analogSticks"`
+	SkipBootLogo   bool     `json:"skipBootLogo"`
+	Force60Hz      bool     `json:"force60Hz"`
+	EnableCDDATOC  bool     `json:"enableCddaToc"`
+	RuntimeProfile string   `json:"runtimeProfile"`
 }
 
 // PS1DiscDetectResult holds auto-detection results for a PS1 disc.
 type PS1DiscDetectResult struct {
-	GameID    string `json:"gameID"`
-	Title     string `json:"title"`
-	Region    string `json:"region"`
-	TrackNum  int    `json:"trackNum"`
-	HasCDDA   bool   `json:"hasCdda"`
-	IsMultiBin bool  `json:"isMultiBin"`
+	GameID     string `json:"gameID"`
+	Title      string `json:"title"`
+	Region     string `json:"region"`
+	TrackNum   int    `json:"trackNum"`
+	HasCDDA    bool   `json:"hasCdda"`
+	IsMultiBin bool   `json:"isMultiBin"`
+	CoverPath  string `json:"coverPath"`
 }
 
-// DetectPS1Disc parses a PS1 .cue file and returns disc metadata.
-func (a *App) DetectPS1Disc(cuePath string) (*PS1DiscDetectResult, error) {
+// DetectPS1Disc parses a PS1 .cue or .bin file and returns disc metadata.
+func (a *App) DetectPS1Disc(discPath string) (*PS1DiscDetectResult, error) {
+	cuePath, err := resolveCompanionCue(discPath)
+	if err != nil {
+		return nil, err
+	}
+
 	disc, err := fpkg.ParsePS1Disc(cuePath)
 	if err != nil {
 		return nil, err
+	}
+	coverPath := ""
+	if disc.Info.GameID != "" {
+		if resolvedCover, err := fpkg.ResolvePS1Cover(cuePath, disc.Info.GameID); err == nil {
+			coverPath = resolvedCover
+		}
 	}
 	return &PS1DiscDetectResult{
 		GameID:     disc.Info.GameID,
@@ -217,14 +337,29 @@ func (a *App) DetectPS1Disc(cuePath string) (*PS1DiscDetectResult, error) {
 		TrackNum:   disc.TrackNum,
 		HasCDDA:    disc.HasCDDA,
 		IsMultiBin: disc.Info.IsMultiBin,
+		CoverPath:  coverPath,
 	}, nil
 }
 
 // CreatePS1FPKG creates a PS1 fPKG from the given options.
 func (a *App) CreatePS1FPKG(req PS1FPKGRequest) error {
+	cuePath, err := resolveCompanionCue(req.CuePath)
+	if err != nil {
+		return err
+	}
+
+	extraDiscs := make([]string, 0, len(req.ExtraDiscs))
+	for i, extraDisc := range req.ExtraDiscs {
+		resolved, err := resolveCompanionCue(extraDisc)
+		if err != nil {
+			return fmt.Errorf("extra disc %d: %w", i+2, err)
+		}
+		extraDiscs = append(extraDiscs, resolved)
+	}
+
 	opts := fpkg.PS1FPKGOptions{
-		CuePath:          req.CuePath,
-		ExtraDiscs:       req.ExtraDiscs,
+		CuePath:          cuePath,
+		ExtraDiscs:       extraDiscs,
 		OutputPath:       req.OutputPath,
 		Title:            req.Title,
 		TitleID:          req.TitleID,
@@ -235,37 +370,48 @@ func (a *App) CreatePS1FPKG(req PS1FPKGRequest) error {
 		SkipBootLogo:     req.SkipBootLogo,
 		Force60Hz:        req.Force60Hz,
 		EnableCDDATOC:    req.EnableCDDATOC,
+		RuntimeProfile:   fpkg.PS1RuntimeProfile(req.RuntimeProfile),
 		EmulatorFilesDir: core.LoadConfig().EmulatorFilesDir,
 	}
 
-	runtime.EventsEmit(a.ctx, "fpkg-progress", 0.0)
+	discPaths := append([]string{cuePath}, extraDiscs...)
+	totalBytes := estimateDiscBytes(discPaths)
+	start := time.Now()
+	a.emitFPKGProgress(start, totalBytes, 0, "Preparing")
 
 	// Ensure emulator assets are downloaded
 	if err := fpkg.EnsureAssets(func(pct float64) {
-		runtime.EventsEmit(a.ctx, "fpkg-progress", pct*0.3) // assets = 0..30%
+		a.emitFPKGProgress(start, totalBytes, pct*20, "Preparing emulator assets")
 	}); err != nil {
 		runtime.EventsEmit(a.ctx, "fpkg-error", "Failed to download emulator assets: "+err.Error())
 		return err
 	}
+	a.emitFPKGProgress(start, totalBytes, 20, "Emulator assets ready")
 
-	err := fpkg.CreatePS1FPKG(opts)
+	opts.OnProgress = func(percent float64, phase string) {
+		a.emitFPKGProgress(start, totalBytes, 20+percent*0.78, phase)
+	}
+
+	err = fpkg.CreatePS1FPKG(opts)
 
 	if err != nil {
 		runtime.EventsEmit(a.ctx, "fpkg-error", err.Error())
 		return err
 	}
 
-	runtime.EventsEmit(a.ctx, "fpkg-progress", 1.0)
+	a.emitFPKGProgress(start, totalBytes, 100, "Complete")
 	runtime.EventsEmit(a.ctx, "fpkg-complete", req.OutputPath)
 	return nil
 }
 
-// OpenCUEFileDialog opens a file dialog for selecting PS1 .cue files.
+// OpenCUEFileDialog opens a file dialog for selecting PS1 .cue or .bin files.
 func (a *App) OpenCUEFileDialog() (string, error) {
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select a PS1 CUE file",
+		Title: "Select a PS1 disc image",
 		Filters: []runtime.FileFilter{
+			{DisplayName: "Disc images", Pattern: "*.cue;*.bin"},
 			{DisplayName: "CUE files", Pattern: "*.cue"},
+			{DisplayName: "BIN files", Pattern: "*.bin"},
 			{DisplayName: "All files", Pattern: "*"},
 		},
 	})
@@ -277,19 +423,19 @@ func (a *App) OpenCUEFileDialog() (string, error) {
 
 // PS2FPKGRequest is the frontend request struct for PS2 fPKG creation.
 type PS2FPKGRequest struct {
-	ISOPaths       []string `json:"isoPaths"`
-	OutputPath     string   `json:"outputPath"`
-	Title          string   `json:"title"`
-	TitleID        string   `json:"titleID"`
-	Icon0          string   `json:"icon0"`
-	Pic1           string   `json:"pic1"`
-	Emulator       string   `json:"emulator"`
-	ConfigTXT      string   `json:"configTxt"`
-	ConfigLUA      string   `json:"configLua"`
-	MemoryCardPath string   `json:"memoryCardPath"`
-	WidescreenPatch string  `json:"widescreenPatch"`
-	Uprender       string   `json:"uprender"`
-	DisplayMode    string   `json:"displayMode"`
+	ISOPaths        []string `json:"isoPaths"`
+	OutputPath      string   `json:"outputPath"`
+	Title           string   `json:"title"`
+	TitleID         string   `json:"titleID"`
+	Icon0           string   `json:"icon0"`
+	Pic1            string   `json:"pic1"`
+	Emulator        string   `json:"emulator"`
+	ConfigTXT       string   `json:"configTxt"`
+	ConfigLUA       string   `json:"configLua"`
+	MemoryCardPath  string   `json:"memoryCardPath"`
+	WidescreenPatch string   `json:"widescreenPatch"`
+	Uprender        string   `json:"uprender"`
+	DisplayMode     string   `json:"displayMode"`
 }
 
 // PS2DiscDetectResult holds auto-detection results for a PS2 disc.
@@ -302,15 +448,23 @@ type PS2DiscDetectResult struct {
 
 // DetectPS2Disc parses a PS2 .iso file and returns disc metadata.
 func (a *App) DetectPS2Disc(isoPath string) (*PS2DiscDetectResult, error) {
-	ext := filepath.Ext(isoPath)
+	ext := strings.ToLower(filepath.Ext(isoPath))
 	var discInfo *fpkg.DiscInfo
 	var err error
 
 	switch ext {
+	case ".iso":
+		discInfo, err = fpkg.ParsePS2Disc(isoPath)
 	case ".cue":
 		discInfo, err = fpkg.ParsePS2DiscFromCUE(isoPath)
+	case ".bin":
+		cuePath, resolveErr := resolveCompanionCue(isoPath)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		discInfo, err = fpkg.ParsePS2DiscFromCUE(cuePath)
 	default:
-		discInfo, err = fpkg.ParsePS2Disc(isoPath)
+		return nil, fmt.Errorf("unsupported file extension: %s (expected .iso, .cue, or .bin)", ext)
 	}
 
 	if err != nil {
@@ -343,14 +497,21 @@ func (a *App) CreatePS2FPKG(req PS2FPKGRequest) error {
 		EmulatorFilesDir: core.LoadConfig().EmulatorFilesDir,
 	}
 
-	runtime.EventsEmit(a.ctx, "fpkg-progress", 0.0)
+	totalBytes := estimateDiscBytes(req.ISOPaths)
+	start := time.Now()
+	a.emitFPKGProgress(start, totalBytes, 0, "Preparing")
 
 	// Ensure emulator assets are downloaded
 	if err := fpkg.EnsureAssets(func(pct float64) {
-		runtime.EventsEmit(a.ctx, "fpkg-progress", pct*0.3) // assets = 0..30%
+		a.emitFPKGProgress(start, totalBytes, pct*20, "Preparing emulator assets")
 	}); err != nil {
 		runtime.EventsEmit(a.ctx, "fpkg-error", "Failed to download emulator assets: "+err.Error())
 		return err
+	}
+	a.emitFPKGProgress(start, totalBytes, 20, "Emulator assets ready")
+
+	opts.OnProgress = func(percent float64, phase string) {
+		a.emitFPKGProgress(start, totalBytes, 20+percent*0.78, phase)
 	}
 
 	err := fpkg.CreatePS2FPKG(opts)
@@ -360,18 +521,20 @@ func (a *App) CreatePS2FPKG(req PS2FPKGRequest) error {
 		return err
 	}
 
-	runtime.EventsEmit(a.ctx, "fpkg-progress", 1.0)
+	a.emitFPKGProgress(start, totalBytes, 100, "Complete")
 	runtime.EventsEmit(a.ctx, "fpkg-complete", req.OutputPath)
 	return nil
 }
 
-// OpenISOFileDialog opens a file dialog for selecting PS2 .iso files.
+// OpenISOFileDialog opens a file dialog for selecting PS2 disc images.
 func (a *App) OpenISOFileDialog() ([]string, error) {
 	return runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select PS2 ISO files",
+		Title: "Select PS2 disc images",
 		Filters: []runtime.FileFilter{
+			{DisplayName: "Disc images", Pattern: "*.iso;*.cue;*.bin"},
 			{DisplayName: "ISO files", Pattern: "*.iso"},
-			{DisplayName: "BIN/CUE files", Pattern: "*.bin;*.cue"},
+			{DisplayName: "CUE files", Pattern: "*.cue"},
+			{DisplayName: "BIN files", Pattern: "*.bin"},
 			{DisplayName: "All files", Pattern: "*"},
 		},
 	})

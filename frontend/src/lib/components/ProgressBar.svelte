@@ -7,6 +7,10 @@
   export let bytesProcessed = 0;
   export let totalBytes = 0;
   export let label = '';
+
+  $: hasBytes = totalBytes > 0;
+  $: hasSpeed = speedBPS > 0;
+  $: hasETA = etaSeconds > 0 && percentage > 0 && percentage < 100;
 </script>
 
 <div class="progress-wrapper">
@@ -20,9 +24,15 @@
 
   <div class="progress-stats">
     <span>{percentage.toFixed(1)}%</span>
-    <span>{formatSize(bytesProcessed)} / {formatSize(totalBytes)}</span>
-    <span>{formatSpeed(speedBPS)}</span>
-    <span>ETA {formatTime(etaSeconds)}</span>
+    {#if hasBytes}
+      <span>{formatSize(bytesProcessed)} / {formatSize(totalBytes)}</span>
+    {/if}
+    {#if hasSpeed}
+      <span>{formatSpeed(speedBPS)}</span>
+    {/if}
+    {#if hasETA}
+      <span>ETA {formatTime(etaSeconds)}</span>
+    {/if}
   </div>
 </div>
 

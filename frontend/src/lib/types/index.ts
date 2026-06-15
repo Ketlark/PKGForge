@@ -17,6 +17,25 @@ export interface SplitProgress {
   etaSeconds: number;
 }
 
+export interface FPKGProgress {
+  percentage: number;
+  phase: string;
+  bytesProcessed: number;
+  totalBytes: number;
+  speedBPS: number;
+  etaSeconds: number;
+}
+
+export interface PS1DiscDetectResult {
+  gameID: string;
+  title: string;
+  region: string;
+  trackNum: number;
+  hasCdda: boolean;
+  isMultiBin: boolean;
+  coverPath: string;
+}
+
 export interface FileEntry {
   path: string;
   name: string;

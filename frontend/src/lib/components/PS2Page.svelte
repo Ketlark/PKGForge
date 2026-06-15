@@ -28,11 +28,13 @@
     browsePic1,
     browseOutput,
     startPS2FPKG,
+    detectPS2Disc,
   } from '../stores/ps2';
 
   function handleDropISO(e: CustomEvent<string[]>) {
     if (e.detail.length > 0) {
       ps2ISOPaths.set(e.detail);
+      void detectPS2Disc(e.detail[0]);
     }
   }
 </script>
@@ -99,15 +101,15 @@
         <label class="form-label" for="ps2-titleid">{$t('ps2.titleID')}</label>
         <input id="ps2-titleid" class="form-input" type="text" bind:value={$ps2TitleID} disabled={$ps2Running} />
 
-        <label class="form-label">{$t('ps2.icon')}</label>
+        <label class="form-label" for="ps2-icon">{$t('ps2.icon')}</label>
         <div class="input-with-btn">
-          <input class="form-input" type="text" bind:value={$ps2Icon0} placeholder="512×512 PNG" disabled={$ps2Running} />
+          <input id="ps2-icon" class="form-input" type="text" bind:value={$ps2Icon0} placeholder="512×512 PNG" disabled={$ps2Running} />
           <button class="btn-sm" on:click={browseIcon} disabled={$ps2Running}>…</button>
         </div>
 
-        <label class="form-label">{$t('ps2.background')}</label>
+        <label class="form-label" for="ps2-background">{$t('ps2.background')}</label>
         <div class="input-with-btn">
-          <input class="form-input" type="text" bind:value={$ps2Pic1} placeholder="1920×1080 PNG" disabled={$ps2Running} />
+          <input id="ps2-background" class="form-input" type="text" bind:value={$ps2Pic1} placeholder="1920×1080 PNG" disabled={$ps2Running} />
           <button class="btn-sm" on:click={browsePic1} disabled={$ps2Running}>…</button>
         </div>
       </div>
@@ -189,8 +191,12 @@
     {#if $ps2Running}
       <div class="section">
         <ProgressBar
-          percentage={$ps2Progress * 100}
-          label={$t('ps2.creating')}
+          percentage={$ps2Progress.percentage}
+          speedBPS={$ps2Progress.speedBPS}
+          etaSeconds={$ps2Progress.etaSeconds}
+          bytesProcessed={$ps2Progress.bytesProcessed}
+          totalBytes={$ps2Progress.totalBytes}
+          label={$ps2Progress.phase || $t('ps2.creating')}
         />
       </div>
     {/if}

@@ -19,6 +19,7 @@
     ps1DetectedTrackNum,
     ps1DetectedHasCDDA,
     ps1DetectedIsMultiBin,
+    ps1DetectedCoverPath,
     ps1OutputPath,
     ps1ExtraDiscs,
     ps1Running,
@@ -32,12 +33,18 @@
     addExtraDisc,
     removeExtraDisc,
     startPS1FPKG,
+    clearPS1DiscSelection,
+    pickPS1DiscPath,
+    selectPS1Disc,
   } from '../stores/ps1';
 
   function handleDropCUE(e: CustomEvent<string[]>) {
-    if (e.detail.length > 0) {
-      ps1CuePath.set(e.detail[0]);
-    }
+    const path = pickPS1DiscPath(e.detail);
+    if (path) void selectPS1Disc(path);
+  }
+
+  function basename(path: string) {
+    return path.split('/').pop() || path.split('\\').pop() || path;
   }
 </script>
 
@@ -56,10 +63,11 @@
         label={$t('ps1.dropCue')}
         subtitle={$t('ps1.dropCueSub')}
         icon="💿"
-        accept=".cue"
+        accept=".cue,.bin"
         disabled={$ps1Running}
         on:files={handleDropCUE}
       />
+      <p class="source-note">{$t('ps1.cueBinHelp')}</p>
       <div class="alt-action">
         <button class="btn-secondary" on:click={browseCUE} disabled={$ps1Running}>
           {$t('ps1.browseCue')}
@@ -67,8 +75,9 @@
       </div>
     {:else}
       <div class="file-info">
+        <span class="disc-label primary">{$t('ps1.disc1')}</span>
         <span class="file-icon">💿</span>
-        <span class="file-name">{$ps1CuePath.split('/').pop() || $ps1CuePath.split('\\').pop()}</span>
+        <span class="file-name">{basename($ps1CuePath)}</span>
         {#if $ps1DetectedGameID}
           <span class="file-detail">{$ps1DetectedGameID}</span>
         {/if}
@@ -81,7 +90,14 @@
         {#if $ps1DetectedHasCDDA}
           <span class="file-detail cdda">CDDA</span>
         {/if}
+        {#if $ps1DetectedCoverPath}
+          <span class="file-detail cover">{$t('ps1.coverFound')}</span>
+        {/if}
+        <button class="btn-ghost-sm" on:click={clearPS1DiscSelection} disabled={$ps1Running}>
+          {$t('ps1.changeDisc')}
+        </button>
       </div>
+      <p class="source-note">{$t('ps1.extraDiscHelp')}</p>
 
       <!-- Extra discs -->
       {#if $ps1ExtraDiscs.length > 0}
@@ -89,7 +105,7 @@
           {#each $ps1ExtraDiscs as disc, i}
             <div class="disc-item">
               <span class="disc-label">Disc {i + 2}</span>
-              <span class="disc-path">{disc.split('/').pop() || disc.split('\\').pop()}</span>
+              <span class="disc-path">{basename(disc)}</span>
               <button class="btn-ghost-sm" on:click={() => removeExtraDisc(i)}>✕</button>
             </div>
           {/each}
@@ -114,15 +130,15 @@
         <label class="form-label" for="ps1-titleid">{$t('ps1.titleID')}</label>
         <input id="ps1-titleid" class="form-input" type="text" bind:value={$ps1TitleID} disabled={$ps1Running} />
 
-        <label class="form-label">{$t('ps1.icon')}</label>
+        <label class="form-label" for="ps1-icon">{$t('ps1.icon')}</label>
         <div class="input-with-btn">
-          <input class="form-input" type="text" bind:value={$ps1Icon0} placeholder="512×512 PNG" disabled={$ps1Running} />
+          <input id="ps1-icon" class="form-input" type="text" bind:value={$ps1Icon0} placeholder="512×512 PNG" disabled={$ps1Running} />
           <button class="btn-sm" on:click={browseIcon} disabled={$ps1Running}>…</button>
         </div>
 
-        <label class="form-label">{$t('ps1.background')}</label>
+        <label class="form-label" for="ps1-background">{$t('ps1.background')}</label>
         <div class="input-with-btn">
-          <input class="form-input" type="text" bind:value={$ps1Pic1} placeholder="1920×1080 PNG" disabled={$ps1Running} />
+          <input id="ps1-background" class="form-input" type="text" bind:value={$ps1Pic1} placeholder="1920×1080 PNG" disabled={$ps1Running} />
           <button class="btn-sm" on:click={browsePic1} disabled={$ps1Running}>…</button>
         </div>
       </div>
@@ -182,8 +198,12 @@
     {#if $ps1Running}
       <div class="section">
         <ProgressBar
-          percentage={$ps1Progress * 100}
-          label={$t('ps1.creating')}
+          percentage={$ps1Progress.percentage}
+          speedBPS={$ps1Progress.speedBPS}
+          etaSeconds={$ps1Progress.etaSeconds}
+          bytesProcessed={$ps1Progress.bytesProcessed}
+          totalBytes={$ps1Progress.totalBytes}
+          label={$ps1Progress.phase || $t('ps1.creating')}
         />
       </div>
     {/if}
@@ -264,6 +284,13 @@
     border-radius: var(--radius-sm);
   }
 
+  .source-note {
+    margin: -2px 0 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--text-muted);
+  }
+
   .file-icon {
     font-size: 18px;
   }
@@ -296,6 +323,11 @@
     background: rgba(139, 92, 246, 0.1);
   }
 
+  .file-detail.cover {
+    color: #16a34a;
+    background: rgba(22, 163, 74, 0.1);
+  }
+
   .extra-discs {
     display: flex;
     flex-direction: column;
@@ -317,6 +349,14 @@
     font-weight: 600;
     color: var(--text-secondary);
     min-width: 50px;
+  }
+
+  .disc-label.primary {
+    min-width: auto;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--accent);
+    background: var(--accent-soft);
   }
 
   .disc-path {
@@ -414,8 +454,13 @@
     font-family: inherit;
   }
 
-  .btn-ghost-sm:hover {
+  .btn-ghost-sm:hover:not(:disabled) {
     color: var(--accent);
+  }
+
+  .btn-ghost-sm:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .checkbox-grid {

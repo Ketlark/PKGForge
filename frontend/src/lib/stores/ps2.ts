@@ -7,6 +7,7 @@ import {
   SavePKGFileDialog,
 } from '../../../wailsjs/go/main/App';
 import { EventsOn } from '../../../wailsjs/runtime/runtime';
+import type { FPKGProgress } from '../types';
 
 // ---------------------------------------------------------------------------
 // State
@@ -34,7 +35,14 @@ export const ps2DetectedSystemCNF = writable<Record<string, string>>({});
 
 // Progress
 export const ps2Running = writable(false);
-export const ps2Progress = writable(0);
+export const ps2Progress = writable<FPKGProgress>({
+  percentage: 0,
+  phase: '',
+  bytesProcessed: 0,
+  totalBytes: 0,
+  speedBPS: 0,
+  etaSeconds: 0,
+});
 export const ps2Error = writable('');
 
 // ---------------------------------------------------------------------------
@@ -51,6 +59,28 @@ export const ps2DiscCount = derived(ps2ISOPaths, ($isos) => $isos.length);
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
+
+function normalizeFPKGProgress(progress: number | Partial<FPKGProgress>): FPKGProgress {
+  if (typeof progress === 'number') {
+    return {
+      percentage: progress <= 1 ? progress * 100 : progress,
+      phase: '',
+      bytesProcessed: 0,
+      totalBytes: 0,
+      speedBPS: 0,
+      etaSeconds: 0,
+    };
+  }
+
+  return {
+    percentage: progress.percentage ?? 0,
+    phase: progress.phase ?? '',
+    bytesProcessed: progress.bytesProcessed ?? 0,
+    totalBytes: progress.totalBytes ?? 0,
+    speedBPS: progress.speedBPS ?? 0,
+    etaSeconds: progress.etaSeconds ?? 0,
+  };
+}
 
 export async function browseISOs() {
   const paths = await OpenISOFileDialog();
@@ -112,7 +142,7 @@ export async function browseOutput() {
 
 export async function startPS2FPKG() {
   ps2Running.set(true);
-  ps2Progress.set(0);
+  ps2Progress.set(normalizeFPKGProgress(0));
   ps2Error.set('');
 
   try {
@@ -138,7 +168,9 @@ export async function startPS2FPKG() {
   }
 }
 
-// Listen for progress events
-EventsOn('fpkg-progress', (pct: number) => {
-  ps2Progress.set(pct);
-});
+// Listen for progress events when running inside Wails.
+if (typeof window !== 'undefined' && (window as any).runtime?.EventsOnMultiple) {
+  EventsOn('fpkg-progress', (progress: number | Partial<FPKGProgress>) => {
+    ps2Progress.set(normalizeFPKGProgress(progress));
+  });
+}
