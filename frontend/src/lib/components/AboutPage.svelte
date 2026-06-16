@@ -19,7 +19,7 @@
     formatDisplayVersion,
   } from '../stores/update';
 
-  const links = [
+  const projectLinks = [
     {
       labelKey: 'about.link.repo',
       descriptionKey: 'about.link.repoDesc',
@@ -62,6 +62,32 @@
     updateBadge.set(false);
     await checkForUpdates();
   }
+
+  $: updateMessage = (() => {
+    if ($updateStatus === 'checking') return $t('about.checking');
+    if ($updateStatus === 'upToDate') return $t('about.upToDate');
+    if ($updateStatus === 'available' && $availableUpdate) {
+      return tWithVersion('about.updateAvailable', $availableUpdate.version);
+    }
+    if ($updateStatus === 'downloading') {
+      return `${$t('about.downloading')} ${Math.round($updateProgress * 100)}%`;
+    }
+    if ($updateStatus === 'ready') return $t('about.updateReady');
+    if ($updateStatus === 'error' && $updateError) {
+      return `${$t('about.updateError')}: ${$updateError}`;
+    }
+    if ($updateBackend === 'sparkle') return $t('about.sparkleHint');
+    return $t('about.updatesIdle');
+  })();
+
+  $: updateMessageClass =
+    $updateStatus === 'upToDate' || $updateStatus === 'ready'
+      ? 'ok'
+      : $updateStatus === 'error'
+        ? 'err'
+        : $updateStatus === 'available'
+          ? 'pending'
+          : '';
 </script>
 
 <div class="page">
@@ -82,46 +108,48 @@
     </div>
   </section>
 
-  <section class="update-panel">
-    <div class="update-header">
-      <span class="eyebrow">{$t('about.updatesTitle')}</span>
-      {#if $updateStatus === 'available' && $availableUpdate}
-        <span class="update-tag">v{$availableUpdate.version}</span>
-      {/if}
-    </div>
-
-    {#if $updateBackend === 'sparkle'}
-      <p class="update-hint">{$t('about.sparkleHint')}</p>
-      <div class="update-actions">
-        <button class="btn-primary" disabled={$updateBusy} on:click={handleCheckUpdates}>
-          {$t('about.checkUpdates')}
+  <div class="top-grid">
+    <section class="story-card panel">
+      <span class="eyebrow">{$t('about.originTitle')}</span>
+      <p class="origin-body">{$t('about.originBody')}</p>
+      <p class="origin-footer">
+        <span class="origin-name">{$t('about.originSignature')}</span>
+        <span class="origin-sep" aria-hidden="true">·</span>
+        <button class="text-link" on:click={() => openExternal('https://github.com/Ketlark')}>
+          {$t('about.originGithub')}
         </button>
-      </div>
-    {:else if $updateStatus === 'idle'}
-      <p class="update-hint">{$t('about.checkUpdates')}</p>
-    {:else if $updateStatus === 'checking'}
-      <p class="update-hint">{$t('about.checking')}</p>
-    {:else if $updateStatus === 'upToDate'}
-      <p class="update-success">{$t('about.upToDate')}</p>
-    {:else if $updateStatus === 'available' && $availableUpdate}
-      <p class="update-hint">{tWithVersion('about.updateAvailable', $availableUpdate.version)}</p>
-      {#if $availableUpdate.releaseNotes}
-        <pre class="release-notes">{$availableUpdate.releaseNotes.trim().slice(0, 400)}{$availableUpdate.releaseNotes.length > 400 ? '…' : ''}</pre>
-      {/if}
-    {:else if $updateStatus === 'downloading'}
-      <p class="update-hint">{$t('about.downloading')} {Math.round($updateProgress * 100)}%</p>
-      <div class="progress-track" aria-hidden="true">
-        <div class="progress-fill" style:width="{$updateProgress * 100}%"></div>
-      </div>
-    {:else if $updateStatus === 'ready'}
-      <p class="update-success">{$t('about.updateReady')}</p>
-    {:else if $updateStatus === 'error' && $updateError}
-      <p class="update-error">{$t('about.updateError')}: {$updateError}</p>
-    {/if}
+      </p>
+    </section>
 
-    <div class="update-actions">
-      {#if $updateBackend !== 'sparkle'}
-        {#if $updateStatus === 'ready'}
+    <section class="update-panel panel" aria-label={$t('about.updatesTitle')}>
+      <div class="update-top">
+        <span class="eyebrow">{$t('about.updatesTitle')}</span>
+        {#if $updateStatus === 'available' && $availableUpdate}
+          <span class="update-tag">v{$availableUpdate.version}</span>
+        {/if}
+      </div>
+      <p
+        class="update-message"
+        class:ok={updateMessageClass === 'ok'}
+        class:err={updateMessageClass === 'err'}
+        class:pending={updateMessageClass === 'pending'}
+      >
+        {updateMessage}
+      </p>
+      {#if $updateStatus === 'downloading'}
+        <div class="progress-track" aria-hidden="true">
+          <div class="progress-fill" style:width="{$updateProgress * 100}%"></div>
+        </div>
+      {/if}
+      {#if $updateStatus === 'available' && $availableUpdate?.releaseNotes}
+        <pre class="release-notes">{$availableUpdate.releaseNotes.trim().slice(0, 320)}{$availableUpdate.releaseNotes.length > 320 ? '…' : ''}</pre>
+      {/if}
+      <div class="update-actions">
+        {#if $updateBackend === 'sparkle'}
+          <button class="btn-primary" disabled={$updateBusy} on:click={handleCheckUpdates}>
+            {$updateBusy ? $t('about.checking') : $t('about.checkUpdates')}
+          </button>
+        {:else if $updateStatus === 'ready'}
           <button class="btn-primary" on:click={restartApp}>{$t('about.restartNow')}</button>
         {:else if $updateStatus === 'available' && $availableUpdate}
           <button class="btn-primary" disabled={$updateBusy} on:click={downloadAndApplyUpdate}>
@@ -130,54 +158,20 @@
           <button class="btn-secondary" on:click={() => openExternal($availableUpdate.releaseUrl)}>
             {$t('about.viewRelease')}
           </button>
-        {:else}
+        {:else if $updateStatus !== 'downloading'}
           <button class="btn-primary" disabled={$updateBusy} on:click={handleCheckUpdates}>
-            {#if $updateStatus === 'checking'}
-              {$t('about.checking')}
-            {:else}
-              {$t('about.checkUpdates')}
-            {/if}
+            {$updateBusy ? $t('about.checking') : $t('about.checkUpdates')}
           </button>
         {/if}
-      {/if}
-    </div>
-  </section>
-
-  <section class="support-panel">
-    <div>
-      <span class="eyebrow">{$t('about.supportTitle')}</span>
-      <h3>{$t('about.supportHeading')}</h3>
-      <p>{$t('about.supportBody')}</p>
-    </div>
-    <div class="support-actions">
-      <button class="btn-primary support-main" on:click={() => openExternal('https://github.com/sponsors/Ketlark')}>
-        {$t('about.supportDonate')}
-      </button>
-      <button class="btn-secondary" on:click={() => openExternal('https://github.com/Ketlark/PKGForge/stargazers')}>
-        {$t('about.supportStar')}
-      </button>
-    </div>
-  </section>
-
-  <section class="details-grid">
-    <div class="section">
-      <h3>{$t('about.creatorLabel')}</h3>
-      <div class="creator">
-        <div class="avatar" aria-hidden="true">KD</div>
-        <div>
-          <strong>{$t('about.creatorName')}</strong>
-          <p>{$t('about.creatorRole')}</p>
-          <button class="text-link" on:click={() => openExternal('https://github.com/Ketlark')}>
-            {$t('about.link.profile')}
-          </button>
-        </div>
       </div>
-    </div>
+    </section>
+  </div>
 
-    <div class="section">
-      <h3>{$t('about.projectTitle')}</h3>
+  <div class="bottom-grid">
+    <section class="links-panel panel">
+      <span class="eyebrow">{$t('about.linksTitle')}</span>
       <div class="link-list">
-        {#each links as link}
+        {#each projectLinks as link}
           <button class="link-row" on:click={() => openExternal(link.url)}>
             <span>
               <strong>{$t(link.labelKey)}</strong>
@@ -187,10 +181,24 @@
           </button>
         {/each}
       </div>
-    </div>
-  </section>
+    </section>
 
-  <section class="legal-note">
+    <section class="support-panel panel">
+      <span class="eyebrow">{$t('about.supportTitle')}</span>
+      <h3>{$t('about.supportHeading')}</h3>
+      <p>{$t('about.supportBody')}</p>
+      <div class="support-actions">
+        <button class="btn-primary support-main" on:click={() => openExternal('https://github.com/sponsors/Ketlark')}>
+          {$t('about.supportDonate')}
+        </button>
+        <button class="btn-secondary" on:click={() => openExternal('https://github.com/Ketlark/PKGForge/stargazers')}>
+          {$t('about.supportStar')}
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <section class="legal-note panel">
     <strong>{$t('about.legalTitle')}</strong>
     <p>{$t('about.legalBody')}</p>
   </section>
@@ -200,15 +208,11 @@
   .page {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
     padding: 20px;
   }
 
-  .intro,
-  .support-panel,
-  .update-panel,
-  .section,
-  .legal-note {
+  .panel {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: rgba(24, 24, 31, 0.62);
@@ -218,40 +222,31 @@
     display: flex;
     gap: 16px;
     align-items: center;
-    padding: 22px;
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(24, 24, 31, 0.62);
   }
 
-  .app-mark-frame,
-  .avatar {
+  .app-mark-frame {
     display: flex;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    color: #fff;
-    background: linear-gradient(135deg, var(--accent), #7c3aed);
-    font-weight: 800;
-    letter-spacing: 0.04em;
-  }
-
-  .app-mark-frame {
-    width: 78px;
-    height: 78px;
-    border-radius: 18px;
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
     background:
       radial-gradient(circle at 50% 48%, rgba(255, 154, 33, 0.18), transparent 52%),
       linear-gradient(145deg, rgba(74, 125, 255, 0.14), rgba(24, 24, 31, 0.92));
     border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow:
-      0 18px 40px rgba(0, 0, 0, 0.25),
-      0 0 24px rgba(74, 125, 255, 0.16);
     overflow: hidden;
   }
 
   .app-mark {
-    width: 70px;
-    height: 70px;
+    width: 64px;
+    height: 64px;
     object-fit: contain;
-    filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.28));
   }
 
   .intro-copy {
@@ -259,9 +254,8 @@
   }
 
   .eyebrow,
-  .section h3,
   .legal-note strong {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--text-secondary);
     text-transform: uppercase;
@@ -269,35 +263,34 @@
   }
 
   .intro h2 {
-    margin: 5px 0 8px;
-    font-size: 28px;
+    margin: 4px 0 6px;
+    font-size: 26px;
     line-height: 1.1;
     color: var(--text-primary);
   }
 
   .intro p,
+  .origin-body,
   .support-panel p,
-  .creator p,
   .legal-note p,
   .link-row small,
-  .update-hint,
-  .update-success,
-  .update-error {
+  .update-message {
     margin: 0;
     color: var(--text-secondary);
     line-height: 1.5;
+    font-size: 13px;
   }
 
   .meta-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 14px;
+    gap: 6px;
+    margin-top: 12px;
   }
 
   .meta-row span,
   .version-pill {
-    padding: 4px 8px;
+    padding: 3px 8px;
     color: var(--text-secondary);
     background: var(--bg-surface);
     border: 1px solid var(--border);
@@ -310,19 +303,91 @@
     border-color: rgba(74, 125, 255, 0.35);
   }
 
-  .update-panel {
+  .top-grid,
+  .bottom-grid {
+    display: grid;
+    gap: 14px;
+    align-items: stretch;
+  }
+
+  .top-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.9fr);
+  }
+
+  .bottom-grid {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  }
+
+  .story-card,
+  .links-panel {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 16px 18px;
-    border-color: rgba(74, 125, 255, 0.28);
+    padding: 16px;
   }
 
-  .update-header {
+  .origin-body {
+    line-height: 1.55;
+  }
+
+  .origin-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 12px;
+  }
+
+  .origin-name {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .origin-sep {
+    color: var(--text-muted);
+  }
+
+  .text-link {
+    margin: 0;
+    padding: 0;
+    color: var(--accent-light);
+    background: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+  }
+
+  .text-link:hover {
+    color: var(--accent);
+  }
+
+  .update-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border-color: rgba(74, 125, 255, 0.22);
+  }
+
+  .update-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 10px;
+  }
+
+  .update-message.ok {
+    color: #86efac;
+  }
+
+  .update-message.err {
+    color: #fca5a5;
+  }
+
+  .update-message.pending {
+    color: var(--accent-light);
   }
 
   .update-tag {
@@ -335,21 +400,21 @@
     border: 1px solid rgba(74, 125, 255, 0.35);
   }
 
-  .update-success {
-    color: #86efac;
-  }
-
-  .update-error {
-    color: #fca5a5;
+  .update-actions,
+  .support-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: auto;
   }
 
   .release-notes {
     margin: 0;
-    padding: 10px 12px;
-    max-height: 120px;
+    padding: 8px 10px;
+    max-height: 88px;
     overflow: auto;
     font-family: inherit;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.45;
     color: var(--text-secondary);
     white-space: pre-wrap;
@@ -372,92 +437,6 @@
     transition: width 0.15s ease;
   }
 
-  .update-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .support-panel {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 18px;
-    align-items: center;
-    padding: 18px;
-    border-color: rgba(74, 125, 255, 0.45);
-    background:
-      linear-gradient(135deg, rgba(74, 125, 255, 0.16), rgba(24, 24, 31, 0.72)),
-      var(--bg-elevated);
-  }
-
-  .support-panel h3 {
-    margin: 6px 0 8px;
-    color: var(--text-primary);
-    font-size: 18px;
-  }
-
-  .support-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .support-main {
-    box-shadow: 0 0 16px var(--accent-glow);
-  }
-
-  .details-grid {
-    display: grid;
-    grid-template-columns: 0.85fr 1.15fr;
-    gap: 16px;
-  }
-
-  .section {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 16px;
-  }
-
-  .section h3 {
-    margin: 0;
-  }
-
-  .creator {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-  }
-
-  .avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    font-size: 14px;
-  }
-
-  .creator strong {
-    display: block;
-    margin-bottom: 3px;
-    color: var(--text-primary);
-  }
-
-  .text-link {
-    margin-top: 7px;
-    padding: 0;
-    color: var(--accent-light);
-    background: none;
-    border: none;
-    cursor: pointer;
-    font: inherit;
-    font-size: 12px;
-  }
-
-  .text-link:hover {
-    color: var(--accent);
-  }
-
   .link-list {
     display: flex;
     flex-direction: column;
@@ -470,7 +449,7 @@
     gap: 12px;
     align-items: center;
     width: 100%;
-    padding: 11px 12px;
+    padding: 10px 12px;
     color: inherit;
     background: var(--bg-surface);
     border: 1px solid var(--border);
@@ -510,12 +489,34 @@
     text-transform: uppercase;
   }
 
+  .support-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border-color: rgba(74, 125, 255, 0.35);
+    background:
+      linear-gradient(135deg, rgba(74, 125, 255, 0.12), rgba(24, 24, 31, 0.72)),
+      var(--bg-elevated);
+  }
+
+  .support-panel h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 17px;
+    line-height: 1.2;
+  }
+
+  .support-main {
+    box-shadow: 0 0 16px var(--accent-glow);
+  }
+
   .legal-note {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     gap: 12px;
     align-items: start;
-    padding: 13px 15px;
+    padding: 12px 14px;
   }
 
   .legal-note strong {
@@ -527,19 +528,13 @@
   }
 
   @media (max-width: 820px) {
-    .intro,
-    .support-panel,
-    .details-grid,
-    .legal-note {
+    .top-grid,
+    .bottom-grid {
       grid-template-columns: 1fr;
     }
 
     .intro {
       align-items: flex-start;
-    }
-
-    .support-actions {
-      justify-content: flex-start;
     }
   }
 </style>

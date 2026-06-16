@@ -12,9 +12,8 @@ Merge, split, inspect, checksum, rename, and build PS1/PS2 fPKGs from one cross-
 
 [Download latest release](https://github.com/Ketlark/PKGForge/releases/latest) ·
 [Features](#features) ·
-[Auto-update](#auto-update) ·
+[Downloads](#downloads) ·
 [Supported inputs](#supported-inputs) ·
-[Support](#support-the-project) ·
 [Build from source](#build-from-source) ·
 [Legal notice](#legal-notice)
 
@@ -24,46 +23,7 @@ Merge, split, inspect, checksum, rename, and build PS1/PS2 fPKGs from one cross-
   <img src="docs/assets/pkg-forge-overview.png" alt="PKG Forge desktop interface with Merge, Split, Inspect, PS1 fPKG, PS2 fPKG, Activity, and Settings tabs" width="920" loading="lazy">
 </p>
 
-PKG Forge is built with a **Svelte** frontend and a **Go** backend, packaged as a native desktop app through [Wails](https://wails.io/). The core archive and fPKG logic lives in Go, with no external packaging binaries required for the main workflows.
-
-## Why PKG Forge
-
-| Focus | What it means |
-|-------|---------------|
-| **One desktop workflow** | Drag files in, choose the operation, track progress, cancel long jobs, and keep history in one app. |
-| **Large archive handling** | Merge and split PKG files with configurable buffers, output naming, progress, speed, and ETA. |
-| **Package insight** | Inspect PKG metadata, validate headers, calculate SHA-256, and rename files from detected metadata. |
-| **PS1/PS2 fPKG creation** | Build PS4 fPKGs from PS1 and PS2 disc images with emulator assets, artwork handling, metadata, PlayGo data, and Debug RIF generation. |
-| **Cross-platform releases** | GitHub Actions publish direct downloads for Windows, macOS universal, Linux amd64, and Linux arm64. |
-| **In-app updates** | Sparkle on macOS (full `.app` swap); built-in updater on Windows and Linux with SHA256 verification. |
-
-## Creator
-
-PKG Forge is created and maintained by [Kévin Dehoux / Ketlark](https://github.com/Ketlark), a full-stack developer and cloud engineer. The project is independent, open source, and built around practical archive management, preservation, homebrew, and backup workflows.
-
-## Support the project
-
-If PKG Forge saves you time, the most useful support is to:
-
-- Star the [GitHub repository](https://github.com/Ketlark/PKGForge).
-- Share the [latest release](https://github.com/Ketlark/PKGForge/releases/latest) with people who need this workflow.
-- Report reproducible bugs or edge cases in [Issues](https://github.com/Ketlark/PKGForge/issues).
-- Use [GitHub Sponsors](https://github.com/sponsors/Ketlark) if direct sponsorship is available for the creator.
-
-## What is new in v1.3.1
-
-- **Fix:** macOS release builds now embed the official `Sparkle.framework` (v1.3.0 crashed at launch with `Library not loaded: Sparkle.framework`).
-- **Fix:** `embed-sparkle.sh` glob bug with spaced app names (`PKG Forge.app`).
-
-## What is new in v1.3.0
-
-- Cross-platform auto-update: Sparkle on macOS release builds, built-in GitHub updater on Windows/Linux.
-- About page with update checks, version display, and project/support links.
-- Version shown in the status bar for quick verification after updates.
-- PS1 multi-bin CUE INDEX recalculation for merged disc images (fixes boot stalls on multi-track games).
-- Release CI: version sync, signed `appcast.xml`, optional Apple codesigning.
-
-Maintainer setup: **[docs/auto-update.md](docs/auto-update.md)**.
+Native desktop app ([Wails](https://wails.io/) + Go + Svelte). Archive and fPKG logic is pure Go — no external packaging binaries for the main workflows.
 
 ## Features
 
@@ -77,26 +37,14 @@ Maintainer setup: **[docs/auto-update.md](docs/auto-update.md)**.
 | **PS1 fPKG** | Build PS4 fPKGs from PS1 `.cue` / `.bin` images, including multi-disc input, title detection, cover art, emulator assets, PlayGo metadata, and Debug RIF generation. |
 | **PS2 fPKG** | Build PS4 fPKGs from PS2 `.iso`, `.cue`, or `.bin` images, with SYSTEM.CNF detection and emulator configuration support. |
 | **UX** | Dark desktop UI, drag-and-drop, file picker, progress, ETA, cancellation, activity log, settings, and keyboard navigation. |
-| **About & support** | Project context, creator profile, repository links, support actions, and legal notes from inside the app. |
-| **Updates** | Check for updates from About; optional startup check in Settings. macOS uses Sparkle; Windows/Linux download and apply in-app. |
+| **Updates** | In-app checks from About (Sparkle on macOS; built-in updater on Windows/Linux). |
 | **i18n** | English and French interface strings. |
 
 Keyboard shortcuts: `Cmd/Ctrl+1` through `Cmd/Ctrl+7` switch between the main workflow tabs; `Cmd/Ctrl+8` opens About.
 
-## Auto-update
-
-| Platform | Mechanism | Notes |
-|----------|-----------|-------|
-| **macOS** | [Sparkle](https://sparkle-project.org/) | Release builds replace the full `.app` bundle. Native update UI. |
-| **Windows / Linux** | Built-in Go updater | GitHub Releases + `SHA256SUMS.txt`; download and restart from About. |
-
-- Toggle **check on startup** in Settings.
-- Dev builds (`Version=dev`) skip update checks.
-- Maintainer setup (EdDSA keys, GitHub secrets, optional Apple signing): **[docs/auto-update.md](docs/auto-update.md)**.
-
 ## Downloads
 
-Get the latest published binaries from the [GitHub Releases page](https://github.com/Ketlark/PKGForge/releases/latest).
+Binaries are published on [GitHub Releases](https://github.com/Ketlark/PKGForge/releases/latest).
 
 | Platform | Asset |
 |----------|-------|
@@ -107,25 +55,13 @@ Get the latest published binaries from the [GitHub Releases page](https://github
 | Checksums | [`SHA256SUMS.txt`](https://github.com/Ketlark/PKGForge/releases/latest/download/SHA256SUMS.txt) |
 | Sparkle feed (macOS) | [`appcast.xml`](https://github.com/Ketlark/PKGForge/releases/latest/download/appcast.xml) |
 
-**macOS — crash at launch (`Library not loaded: Sparkle.framework`)**
-
-Fixed in **v1.3.1+**. v1.3.0 macOS builds were missing `Sparkle.framework` due to a CI embed script bug with spaced app names. Upgrade from [Releases](https://github.com/Ketlark/PKGForge/releases/latest).
-
-**macOS — « application endommagée » après téléchargement**
-
-Les builds CI ne sont pas encore signés avec un certificat Apple Developer ID tant que les secrets de signature ne sont pas configurés ([docs/auto-update.md](docs/auto-update.md)). macOS affiche alors un faux message d’app endommagée (quarantaine Gatekeeper). Après extraction du zip :
-
-```bash
-xattr -cr "/Applications/PKG Forge.app"
-```
-
-Remplace le chemin par l’emplacement réel de ton `.app`. Alternative : clic droit → **Ouvrir** la première fois.
-
 Linux binaries may need execute permission after download:
 
 ```bash
 chmod +x pkg-forge-linux-amd64
 ```
+
+Auto-update setup and troubleshooting: **[docs/auto-update.md](docs/auto-update.md)**.
 
 ## Supported inputs
 
@@ -194,7 +130,7 @@ wails dev
 wails build
 ```
 
-Artifacts appear under `build/bin/`. The exact layout depends on your OS and Wails version.
+Artifacts appear under `build/bin/`.
 
 **macOS release build (with Sparkle auto-update):**
 
@@ -205,91 +141,11 @@ CGO_ENABLED=1 CGO_LDFLAGS='-Wl,-rpath,@loader_path/../Frameworks' \
 
 The post-build hook in `wails.json` embeds `Sparkle.framework` into the `.app`.
 
-### Tests
-
-```bash
-go test ./...
-npm --prefix frontend run build
-```
-
-## CI/CD and releases
-
-GitHub Actions run on every push or pull request to `main` or `master`: `go vet`, `go test`, frontend `npm ci`, `npm run build`, and `svelte-check`.
-
-Automatic releases are created by pushing an annotated tag matching `v*`.
-
-```bash
-git tag -a v1.2.0 -m "Release v1.2.0"
-git push origin v1.2.0
-```
-
-Before building, CI syncs `wails.json` `info.productVersion` from the tag so `CFBundleVersion`, `main.Version`, and the Sparkle appcast stay aligned.
-
-The release workflow builds:
-
-| Asset | Contents |
-|-------|----------|
-| `pkg-forge-windows-amd64.exe` | Windows executable |
-| `pkg-forge-linux-amd64` | Linux x86_64 binary |
-| `pkg-forge-linux-arm64` | Linux ARM64 binary |
-| `pkg-forge-macos-universal.zip` | macOS `.app` bundle (Sparkle-enabled) |
-| `SHA256SUMS.txt` | Checksums for release binaries |
-| `appcast.xml` | Sparkle update feed for macOS |
-
-**Maintainers:** configure Sparkle EdDSA keys and optional Apple signing secrets as described in **[docs/auto-update.md](docs/auto-update.md)**.
-
-The Linux arm64 job uses the hosted runner `ubuntu-24.04-arm`, which is available for public repositories on GitHub. For private repositories, remove or adjust that matrix entry if the runner is unavailable.
-
-## Project layout
-
-```text
-pkg-forge/
-├── main.go                 # Wails entry, embedded frontend assets, Version var
-├── app.go                  # Wails bindings between Go and Svelte
-├── wails.json              # Wails app metadata, info.productVersion, post-build hooks
-├── scripts/                # Release helpers (version sync, Sparkle, signing, appcast)
-├── core/                   # Pure Go logic, no Wails import
-│   ├── merge.go            # Merge pipeline
-│   ├── split.go            # Split pipeline
-│   ├── detect.go           # Split part detection and ordering
-│   ├── validate.go         # PKG header validation
-│   ├── inspect.go          # Metadata extraction
-│   ├── checksum.go         # SHA-256 with progress
-│   ├── rename.go           # Rename suggestions and apply
-│   ├── diskspace*.go       # Free space helpers, OS-specific
-│   ├── history.go          # Local activity/history persistence
-│   ├── config.go           # User config (incl. checkUpdatesOnStartup)
-│   ├── update_common.go    # Update types, semver helpers
-│   ├── update_builtin.go   # GitHub updater (Windows/Linux, macOS dev)
-│   ├── update_sparkle.go   # Sparkle backend (macOS release, -tags sparkle)
-│   ├── fpkg/               # Native PS1/PS2 PS4 fPKG builder
-│   ├── format.go, progress.go, options.go
-│   └── *_test.go
-├── docs/
-│   ├── auto-update.md      # Auto-update setup, secrets, troubleshooting
-│   └── adr/                # Architecture decision records
-└── frontend/               # Svelte + Vite
-    └── src/
-        ├── App.svelte      # Shell, tabs, shortcuts, startup update check
-        ├── app.css
-        └── lib/
-            ├── components/ # Merge, Split, Inspect, About, Settings, PS1, PS2
-            ├── stores/     # i18n, activity, merge/split/fPKG/update state
-            ├── utils/
-            └── types/
-```
-
-Generated bindings under `frontend/wailsjs/` are produced by Wails during `wails dev` and `wails build`. Do not edit them by hand.
-
-## Legal notice
-
-This tool is intended for legitimate uses such as managing backups or archives you are entitled to handle. You are responsible for complying with applicable laws, platform terms, and intellectual property rules. The authors do not endorse piracy or DRM circumvention.
-
-PKG Forge is an independent open-source project and is not affiliated with Sony Interactive Entertainment.
+Releases are cut by pushing an annotated `v*` tag; CI builds all platforms. Maintainer details: **[docs/auto-update.md](docs/auto-update.md)**.
 
 ## Contributing
 
-Issues and pull requests are welcome. Before submitting changes, run:
+Issues and pull requests are welcome. Before submitting changes:
 
 ```bash
 go test ./...
@@ -298,10 +154,12 @@ npm --prefix frontend run build
 
 Please match the existing Go and Svelte style, keep changes focused, and include tests for behavior that affects archive or fPKG generation.
 
+## Legal notice
+
+This tool is intended for legitimate uses such as managing backups or archives you are entitled to handle. You are responsible for complying with applicable laws, platform terms, and intellectual property rules. The authors do not endorse piracy or DRM circumvention.
+
+PKG Forge is an independent open-source project and is not affiliated with Sony Interactive Entertainment.
+
 ## License
 
 [MIT](LICENSE) © Ketlark.
-
-## Acknowledgements
-
-Built with [Wails](https://wails.io/), [Svelte](https://svelte.dev/), and [Vite](https://vitejs.dev/).
