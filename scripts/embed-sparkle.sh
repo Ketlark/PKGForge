@@ -18,20 +18,41 @@ if [[ -z "$APP_BUNDLE" || ! -d "$APP_BUNDLE" ]]; then
   exit 1
 fi
 
-BIN="$APP_BUNDLE/Contents/MacOS/"*
+BIN="$(find "$APP_BUNDLE/Contents/MacOS" -maxdepth 1 -type f -print -quit)"
+if [[ -z "$BIN" || ! -f "$BIN" ]]; then
+  echo "embed-sparkle: no executable in $APP_BUNDLE/Contents/MacOS" >&2
+  exit 1
+fi
 if ! otool -L "$BIN" 2>/dev/null | grep -q 'Sparkle.framework'; then
   echo "embed-sparkle: binary not linked against Sparkle (build without -tags sparkle?), skipping"
   exit 0
 fi
 
-MOD_DIR="$(go list -f '{{.Dir}}' -m github.com/abemedia/go-sparkle)"
-SRC_FW="$MOD_DIR/Sparkle.framework"
-DEST_DIR="$APP_BUNDLE/Contents/Frameworks"
+resolve_sparkle_framework() {
+  if [[ -n "${SPARKLE_FRAMEWORK_PATH:-}" && -d "${SPARKLE_FRAMEWORK_PATH}/Versions/B/Sparkle" ]]; then
+    echo "$SPARKLE_FRAMEWORK_PATH"
+    return
+  fi
 
-if [[ ! -d "$SRC_FW" ]]; then
-  echo "embed-sparkle: Sparkle.framework not found in $MOD_DIR" >&2
-  exit 1
-fi
+  local version="${SPARKLE_VERSION:-2.6.4}"
+  local cache="${XDG_CACHE_HOME:-$HOME/.cache}/pkg-forge/sparkle-${version}"
+  local fw="$cache/Sparkle.framework"
+
+  if [[ ! -d "$fw/Versions/B/Sparkle" ]]; then
+    mkdir -p "$cache"
+    local tar="$cache/sparkle.tar.xz"
+    echo "embed-sparkle: downloading Sparkle ${version} framework..." >&2
+    curl -fsSL -o "$tar" \
+      "https://github.com/sparkle-project/Sparkle/releases/download/${version}/Sparkle-${version}.tar.xz"
+    tar xf "$tar" -C "$cache" ./Sparkle.framework
+    rm -f "$tar"
+  fi
+
+  echo "$fw"
+}
+
+SRC_FW="$(resolve_sparkle_framework)"
+DEST_DIR="$APP_BUNDLE/Contents/Frameworks"
 
 mkdir -p "$DEST_DIR"
 ditto "$SRC_FW" "$DEST_DIR/Sparkle.framework"

@@ -104,6 +104,15 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
+      - name: Install Sparkle framework (macOS)
+        if: matrix.package == 'mac'
+        run: |
+          SPARKLE_VERSION=2.6.4
+          curl -fsSL -o sparkle.tar.xz "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          tar xf sparkle.tar.xz
+          echo "$(pwd)/bin" >> "$GITHUB_PATH"
+          echo "SPARKLE_FRAMEWORK_PATH=$(pwd)/Sparkle.framework" >> "$GITHUB_ENV"
+
       - name: wails build (macOS + Sparkle)
         if: matrix.package == 'mac'
         env:
@@ -111,6 +120,7 @@ jobs:
           CGO_LDFLAGS: "-Wl,-rpath,@loader_path/../Frameworks"
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_FRAMEWORK_PATH: ${{ env.SPARKLE_FRAMEWORK_PATH }}
         run: |
           chmod +x scripts/embed-sparkle.sh scripts/sign-macos-app.sh
           SPARKLE_MOD="$(go list -f '{{.Dir}}' -m github.com/abemedia/go-sparkle)"
@@ -119,6 +129,10 @@ jobs:
           wails build -platform ${{ matrix.platform }} -clean -tags sparkle -skipbindings \
             -ldflags "-X main.Version=${{ steps.version.outputs.version }}"
           APP=$(find build/bin -maxdepth 1 -name "*.app" | head -1)
+          if [ -z "$APP" ]; then echo "No .app in build/bin"; ls -la build/bin; exit 1; fi
+          # Belt-and-suspenders: post-build hook can skip when the .app name contains spaces.
+          bash scripts/embed-sparkle.sh "$APP/Contents/MacOS/pkg-forge"
+          test -f "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle"
           if [ -n "$SPARKLE_PUBLIC_ED_KEY" ] && [ -n "$APP" ]; then
             /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_PUBLIC_ED_KEY" "$APP/Contents/Info.plist"
           fi
@@ -140,14 +154,6 @@ jobs:
           if [ -z "$APP" ]; then echo "No .app in build/bin"; ls -la build/bin; exit 1; fi
           ditto -c -k --sequesterRsrc --keepParent "$APP" pkg-forge-macos-universal.zip
           echo "PACKAGED=pkg-forge-macos-universal.zip" >> "$GITHUB_ENV"
-
-      - name: Install Sparkle tools (macOS)
-        if: matrix.package == 'mac'
-        run: |
-          SPARKLE_VERSION=2.6.4
-          curl -fsSL -o sparkle.tar.xz "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
-          tar xf sparkle.tar.xz
-          echo "$(pwd)/bin" >> "$GITHUB_PATH"
 
       - name: Notarize macOS app
         if: matrix.package == 'mac'

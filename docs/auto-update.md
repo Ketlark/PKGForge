@@ -174,7 +174,7 @@ wails build
 | Script | Role |
 |--------|------|
 | `scripts/sync-product-version.sh` | Sync `wails.json` `info.productVersion` from tag |
-| `scripts/embed-sparkle.sh` | Copy `Sparkle.framework` into `.app` (post-build hook) |
+| `scripts/embed-sparkle.sh` | Copy official Sparkle `Sparkle.framework` into `.app` (post-build hook) |
 | `scripts/sign-macos-app.sh` | Codesign app + Sparkle nested binaries |
 | `scripts/notarize-macos-app.sh` | Notarize and staple release zip |
 | `scripts/generate-appcast.sh` | Build signed `appcast.xml` via Sparkle `generate_appcast` |
@@ -187,6 +187,7 @@ wails build
 |---------|----------------|
 | Sparkle never offers updates | Missing/wrong `SPARKLE_*` secrets; unsigned appcast; `SUPublicEDKey` empty in installed app |
 | Feed URL 404 | `appcast.xml` not attached to the latest release, or wrong URL (`releases/latest/download/`, not `releases/download/latest/`) |
+| macOS app crashes at launch (`Sparkle.framework` missing) | `embed-sparkle.sh` glob failed on spaced `.app` names (e.g. `PKG Forge.app`); fixed in v1.3.1 |
 | Update offered but install fails | App not signed/notarized; quarantined download; Gatekeeper block |
 | Win/Linux says up to date but GitHub has newer tag | `main.Version` is `dev`; or semver pre-release tag not parsed |
 | macOS dev build behaves differently from release | Dev builds lack `-tags sparkle`; use built-in updater instead |

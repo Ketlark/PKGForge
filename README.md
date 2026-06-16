@@ -50,6 +50,11 @@ If PKG Forge saves you time, the most useful support is to:
 - Report reproducible bugs or edge cases in [Issues](https://github.com/Ketlark/PKGForge/issues).
 - Use [GitHub Sponsors](https://github.com/sponsors/Ketlark) if direct sponsorship is available for the creator.
 
+## What is new in v1.3.1
+
+- **Fix:** macOS release builds now embed the official `Sparkle.framework` (v1.3.0 crashed at launch with `Library not loaded: Sparkle.framework`).
+- **Fix:** `embed-sparkle.sh` glob bug with spaced app names (`PKG Forge.app`).
+
 ## What is new in v1.3.0
 
 - Cross-platform auto-update: Sparkle on macOS release builds, built-in GitHub updater on Windows/Linux.
@@ -101,6 +106,20 @@ Get the latest published binaries from the [GitHub Releases page](https://github
 | Linux arm64 | [`pkg-forge-linux-arm64`](https://github.com/Ketlark/PKGForge/releases/latest/download/pkg-forge-linux-arm64) |
 | Checksums | [`SHA256SUMS.txt`](https://github.com/Ketlark/PKGForge/releases/latest/download/SHA256SUMS.txt) |
 | Sparkle feed (macOS) | [`appcast.xml`](https://github.com/Ketlark/PKGForge/releases/latest/download/appcast.xml) |
+
+**macOS — crash at launch (`Library not loaded: Sparkle.framework`)**
+
+Fixed in **v1.3.1+**. v1.3.0 macOS builds were missing `Sparkle.framework` due to a CI embed script bug with spaced app names. Upgrade from [Releases](https://github.com/Ketlark/PKGForge/releases/latest).
+
+**macOS — « application endommagée » après téléchargement**
+
+Les builds CI ne sont pas encore signés avec un certificat Apple Developer ID tant que les secrets de signature ne sont pas configurés ([docs/auto-update.md](docs/auto-update.md)). macOS affiche alors un faux message d’app endommagée (quarantaine Gatekeeper). Après extraction du zip :
+
+```bash
+xattr -cr "/Applications/PKG Forge.app"
+```
+
+Remplace le chemin par l’emplacement réel de ton `.app`. Alternative : clic droit → **Ouvrir** la première fois.
 
 Linux binaries may need execute permission after download:
 
