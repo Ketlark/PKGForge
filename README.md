@@ -1,9 +1,5 @@
 # PKG Forge
 
-<p align="center">
-  <img src="docs/assets/branding/pkg-forge-readme-banner-memoji.png" alt="PKG Forge banner" width="100%">
-</p>
-
 <div align="center">
 
 **A native desktop toolbox for PlayStation PKG archives and PS1/PS2 PS4 fPKG workflows.**
@@ -27,7 +23,7 @@ Merge, split, inspect, checksum, rename, and build PS1/PS2 fPKGs from one cross-
 </div>
 
 <p align="center">
-  <img src="docs/assets/pkg-forge-overview.png" alt="PKG Forge desktop interface with Merge, Split, Inspect, PS1 fPKG, PS2 fPKG, Activity, and Settings tabs" width="920">
+  <img src="docs/assets/pkg-forge-overview.png" alt="PKG Forge desktop interface with Merge, Split, Inspect, PS1 fPKG, PS2 fPKG, Activity, and Settings tabs" width="920" loading="lazy">
 </p>
 
 PKG Forge is built with a **Svelte** frontend and a **Go** backend, packaged as a native desktop app through [Wails](https://wails.io/). The core archive and fPKG logic lives in Go, with no external packaging binaries required for the main workflows.
@@ -56,17 +52,16 @@ If PKG Forge saves you time, the most useful support is to:
 - Report reproducible bugs or edge cases in [Issues](https://github.com/Ketlark/PKGForge/issues).
 - Use [GitHub Sponsors](https://github.com/sponsors/Ketlark) if direct sponsorship is available for the creator.
 
-## What is new in v1.2.0
+## Latest changes
 
-This release is focused on PS1 fPKG polish and UI cleanup.
+Recent work on `main` since v1.2.0:
 
-- PS1 launch backgrounds are now handled automatically.
-- The official PS1HD default background is bundled as a fallback.
-- Local game artwork can be used when present next to the disc image.
-- Cover-derived fallback backgrounds are generated when no background exists.
-- Required PS1 `sce_sys` launch artwork is filled consistently.
-- PS1 emulator config now includes the first-launch Start/Select tutorial flag.
-- Obsolete PS1 emulator selection was removed from the UI.
+- Cross-platform auto-update: Sparkle on macOS release builds, built-in GitHub updater on Windows/Linux.
+- About page with version display, update checks, and project/support links.
+- PS1 multi-bin CUE INDEX recalculation for merged disc images (fixes boot stalls on multi-track games).
+- Release CI: version sync, signed `appcast.xml`, optional Apple codesigning.
+
+See [docs/auto-update.md](docs/auto-update.md) for maintainer setup.
 
 ## Features
 
