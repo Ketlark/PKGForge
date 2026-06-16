@@ -7,7 +7,7 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "postBuildHooks": {
-    "darwin/*": "bash scripts/embed-sparkle.sh ${bin}"
+    "darwin/*": "bash ../../scripts/embed-sparkle.sh ${bin}"
   },
   "info": {
     "companyName": "Ketlark",
