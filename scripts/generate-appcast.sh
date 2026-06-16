@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generate a signed Sparkle appcast.xml for the macOS update zip in dist/.
 #
-# Requires Sparkle bin/ on PATH (generate_appcast, sign_update).
+# Requires Sparkle sign_update on PATH (macOS Sparkle bin/).
 # Env:
 #   SPARKLE_EDDSA_PRIVATE_KEY  EdDSA private key PEM (GitHub secret)
 #   RELEASE_VERSION            Tag, e.g. v1.2.0
@@ -13,12 +13,10 @@ ZIP_PATH="$DIST_DIR/$ZIP_NAME"
 APPCAST="$DIST_DIR/appcast.xml"
 TAG="${RELEASE_VERSION:?RELEASE_VERSION is required}"
 VERSION="${TAG#v}"
-FEED_DIR="$(mktemp -d)"
 KEY_FILE="$(mktemp)"
 
 cleanup() {
   rm -f "$KEY_FILE"
-  rm -rf "$FEED_DIR"
 }
 trap cleanup EXIT
 
@@ -57,19 +55,37 @@ EOF
   exit 0
 fi
 
-if ! command -v generate_appcast >/dev/null 2>&1; then
-  echo "generate-appcast: generate_appcast not found on PATH" >&2
+if ! command -v sign_update >/dev/null 2>&1; then
+  echo "generate-appcast: sign_update not found on PATH" >&2
   exit 1
 fi
 
 printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$KEY_FILE"
-cp "$ZIP_PATH" "$FEED_DIR/"
+SIGNATURE="$(sign_update --ed-key-file "$KEY_FILE" -p "$ZIP_PATH")"
+LENGTH="$(wc -c < "$ZIP_PATH" | tr -d ' ')"
 
-generate_appcast \
-  -o "$APPCAST" \
-  --ed-key-file "$KEY_FILE" \
-  --download-url-prefix "$DOWNLOAD_PREFIX" \
-  --link "https://github.com/Ketlark/PKGForge/releases/tag/${TAG}" \
-  "$FEED_DIR"
+cat > "$APPCAST" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>PKG Forge</title>
+    <link>https://github.com/Ketlark/PKGForge</link>
+    <description>PKG Forge updates</description>
+    <language>en</language>
+    <item>
+      <title>Version ${VERSION}</title>
+      <link>https://github.com/Ketlark/PKGForge/releases/tag/${TAG}</link>
+      <sparkle:version>${VERSION}</sparkle:version>
+      <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+      <pubDate>$(date -R)</pubDate>
+      <enclosure
+        url="${DOWNLOAD_PREFIX}${ZIP_NAME}"
+        sparkle:edSignature="${SIGNATURE}"
+        length="${LENGTH}"
+        type="application/octet-stream"/>
+    </item>
+  </channel>
+</rss>
+EOF
 
 echo "generate-appcast: wrote signed appcast to $APPCAST"
