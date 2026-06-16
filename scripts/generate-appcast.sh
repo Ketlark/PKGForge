@@ -61,8 +61,13 @@ if ! command -v sign_update >/dev/null 2>&1; then
 fi
 
 printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$KEY_FILE"
-SIGNATURE="$(sign_update --ed-key-file "$KEY_FILE" -p "$ZIP_PATH")"
+SIGNATURE="$(sign_update --ed-key-file "$KEY_FILE" -p "$ZIP_PATH" | tr -d '\n\r')"
 LENGTH="$(wc -c < "$ZIP_PATH" | tr -d ' ')"
+
+if ! sign_update --ed-key-file "$KEY_FILE" --verify "$ZIP_PATH" "$SIGNATURE"; then
+  echo "generate-appcast: signature self-check failed" >&2
+  exit 1
+fi
 
 cat > "$APPCAST" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
@@ -88,4 +93,4 @@ cat > "$APPCAST" <<EOF
 </rss>
 EOF
 
-echo "generate-appcast: wrote signed appcast to $APPCAST"
+echo "generate-appcast: wrote signed appcast to $APPCAST (length=${LENGTH})"

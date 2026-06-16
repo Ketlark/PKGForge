@@ -177,7 +177,9 @@ wails build
 | `scripts/embed-sparkle.sh` | Copy official Sparkle `Sparkle.framework` into `.app` (post-build hook) |
 | `scripts/sign-macos-app.sh` | Codesign app + Sparkle nested binaries |
 | `scripts/notarize-macos-app.sh` | Notarize and staple release zip |
-| `scripts/generate-appcast.sh` | Build signed `appcast.xml` via Sparkle `generate_appcast` |
+| `scripts/generate-appcast.sh` | Build signed `appcast.xml` via Sparkle `sign_update` (+ self-verify) |
+| `scripts/derive_sparkle_public_key.go` | Derive `SUPublicEDKey` from exported private key (CI key-pair check) |
+| `scripts/resign-macos-adhoc.sh` | Ad-hoc re-sign `.app` after `Info.plist` / Sparkle edits |
 
 ---
 
@@ -186,11 +188,24 @@ wails build
 | Symptom | Likely cause |
 |---------|----------------|
 | Sparkle never offers updates | Missing/wrong `SPARKLE_*` secrets; unsigned appcast; `SUPublicEDKey` empty in installed app |
+| **“The update is improperly signed…”** | Installed app has empty/wrong `SUPublicEDKey` (common with local `wails build`); or `SPARKLE_PUBLIC_ED_KEY` / `SPARKLE_EDDSA_PRIVATE_KEY` mismatch in CI; or testing with a dev-signed build against ad-hoc CI releases |
 | Feed URL 404 | `appcast.xml` not attached to the latest release, or wrong URL (`releases/latest/download/`, not `releases/download/latest/`) |
 | macOS app crashes at launch (`Sparkle.framework` missing) | `embed-sparkle.sh` glob failed on spaced `.app` names (e.g. `PKG Forge.app`); fixed in v1.3.1 |
 | Update offered but install fails | App not signed/notarized; quarantined download; Gatekeeper block |
 | Win/Linux says up to date but GitHub has newer tag | `main.Version` is `dev`; or semver pre-release tag not parsed |
 | macOS dev build behaves differently from release | Dev builds lack `-tags sparkle`; use built-in updater instead |
+
+**Diagnose Sparkle signature errors on macOS:**
+
+```bash
+# Installed app must expose the same public key as CI (non-empty)
+/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' '/Applications/PKG Forge.app/Contents/Info.plist'
+
+# Sparkle logs (reproduce the failed update first)
+log show --last 5m --predicate 'process CONTAINS[c] "Sparkle" OR process CONTAINS[c] "pkg-forge"' | tail -80
+```
+
+For update testing, start from a **GitHub release** build (e.g. v1.3.1 zip), not an unsigned local `wails build`, unless you also build with `-tags sparkle` after these plist fixes.
 
 ---
 

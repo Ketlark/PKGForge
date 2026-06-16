@@ -30,7 +30,7 @@
         <key>SUAllowsAutomaticUpdates</key>
         <false/>
         <key>SUPublicEDKey</key>
-        <string></string>
+        <string>Nl64z98x17/GGzL/k7JNQ5S3B19x0ukTnAzRZcpcJfg=</string>
         {{if .Info.FileAssociations}}
         <key>CFBundleDocumentTypes</key>
         <array>

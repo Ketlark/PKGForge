@@ -120,9 +120,10 @@ jobs:
           CGO_LDFLAGS: "-Wl,-rpath,@loader_path/../Frameworks"
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
           SPARKLE_FRAMEWORK_PATH: ${{ env.SPARKLE_FRAMEWORK_PATH }}
         run: |
-          chmod +x scripts/embed-sparkle.sh scripts/sign-macos-app.sh
+          chmod +x scripts/embed-sparkle.sh scripts/sign-macos-app.sh scripts/resign-macos-adhoc.sh
           SPARKLE_MOD="$(go list -f '{{.Dir}}' -m github.com/abemedia/go-sparkle)"
           export DYLD_FRAMEWORK_PATH="$SPARKLE_MOD"
           # Bindings are committed; skip running the Sparkle-linked binary during generation.
@@ -133,9 +134,21 @@ jobs:
           # Belt-and-suspenders: post-build hook can skip when the .app name contains spaces.
           bash scripts/embed-sparkle.sh "$APP/Contents/MacOS/pkg-forge"
           test -f "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle"
-          if [ -n "$SPARKLE_PUBLIC_ED_KEY" ] && [ -n "$APP" ]; then
+          KEY_FILE="$(mktemp)"
+          cleanup_key() { rm -f "$KEY_FILE"; }
+          trap cleanup_key EXIT
+          if [ -n "${SPARKLE_EDDSA_PRIVATE_KEY:-}" ]; then
+            printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$KEY_FILE"
+            DERIVED_PUB="$(go run scripts/derive_sparkle_public_key.go "$KEY_FILE")"
+            if [ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ] && [ "$DERIVED_PUB" != "$SPARKLE_PUBLIC_ED_KEY" ]; then
+              echo "SPARKLE_PUBLIC_ED_KEY does not match SPARKLE_EDDSA_PRIVATE_KEY" >&2
+              exit 1
+            fi
+            /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $DERIVED_PUB" "$APP/Contents/Info.plist"
+          elif [ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ] && [ -n "$APP" ]; then
             /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_PUBLIC_ED_KEY" "$APP/Contents/Info.plist"
           fi
+          bash scripts/resign-macos-adhoc.sh "$APP"
           if [ -n "$APPLE_SIGNING_IDENTITY" ] && [ -n "$APP" ]; then
             scripts/sign-macos-app.sh "$APP"
           fi
