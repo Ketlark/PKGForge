@@ -166,10 +166,11 @@ jobs:
           SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
-          mkdir -p dist
-          cp pkg-forge-macos-universal.zip dist/
+          mkdir -p feed
+          cp pkg-forge-macos-universal.zip feed/
           chmod +x scripts/generate-appcast.sh
-          bash scripts/generate-appcast.sh dist
+          bash scripts/generate-appcast.sh feed
+          mv feed/appcast.xml appcast.xml
 
       - name: Prepare artifact (Linux)
         if: matrix.package == 'linux'
@@ -194,7 +195,7 @@ jobs:
           name: ${{ matrix.name }}
           path: |
             pkg-forge-macos-universal.zip
-            dist/appcast.xml
+            appcast.xml
           if-no-files-found: error
 
   release:
