@@ -141,6 +141,14 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "$APP" pkg-forge-macos-universal.zip
           echo "PACKAGED=pkg-forge-macos-universal.zip" >> "$GITHUB_ENV"
 
+      - name: Install Sparkle tools (macOS)
+        if: matrix.package == 'mac'
+        run: |
+          SPARKLE_VERSION=2.6.4
+          curl -fsSL -o sparkle.tar.xz "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          tar xf sparkle.tar.xz
+          echo "$(pwd)/bin" >> "$GITHUB_PATH"
+
       - name: Notarize macOS app
         if: matrix.package == 'mac'
         env:
@@ -152,6 +160,17 @@ jobs:
           chmod +x scripts/notarize-macos-app.sh
           scripts/notarize-macos-app.sh pkg-forge-macos-universal.zip
 
+      - name: Generate Sparkle appcast (macOS)
+        if: matrix.package == 'mac'
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          cp pkg-forge-macos-universal.zip dist/
+          chmod +x scripts/generate-appcast.sh
+          bash scripts/generate-appcast.sh dist
+
       - name: Prepare artifact (Linux)
         if: matrix.package == 'linux'
         run: |
@@ -161,10 +180,21 @@ jobs:
           echo "PACKAGED=$OUT" >> "$GITHUB_ENV"
 
       - name: Upload artifact
+        if: matrix.package != 'mac'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
           path: ${{ env.PACKAGED }}
+          if-no-files-found: error
+
+      - name: Upload macOS artifact
+        if: matrix.package == 'mac'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            pkg-forge-macos-universal.zip
+            dist/appcast.xml
           if-no-files-found: error
 
   release:
@@ -180,27 +210,12 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Install Sparkle tools
-        run: |
-          SPARKLE_VERSION=2.6.4
-          curl -fsSL -o sparkle.tar.xz "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
-          tar xf sparkle.tar.xz
-          echo "$(pwd)/bin" >> "$GITHUB_PATH"
-
       - name: Generate SHA256SUMS
         working-directory: dist
         run: |
           ls -la
           sha256sum pkg-forge-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
-
-      - name: Generate Sparkle appcast
-        env:
-          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
-          RELEASE_VERSION: ${{ github.ref_name }}
-        run: |
-          chmod +x scripts/generate-appcast.sh
-          bash scripts/generate-appcast.sh dist
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
