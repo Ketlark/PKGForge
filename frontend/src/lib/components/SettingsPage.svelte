@@ -1,15 +1,19 @@
 <script lang="ts">
+  import { createEventDispatcher } from 'svelte';
   import { onMount } from 'svelte';
   import { t, locale } from '../stores/i18n';
   import type { Locale } from '../stores/i18n';
   import { addLog } from '../stores/activity';
   import { LoadConfig, SaveConfig, BufferLabels, ChunkLabels, SplitFormatLabels, OpenEmulatorDirDialog } from '../../../wailsjs/go/main/App';
 
+  const dispatch = createEventDispatcher<{ openAbout: void }>();
+
   let bufferLabel = '64 MB';
   let chunkLabel = '4 GB';
   let splitFormat = '_NNN.pkgpart';
   let language: Locale = 'en';
   let emulatorFilesDir = '';
+  let checkUpdatesOnStartup = true;
 
   let bufferOptions: string[] = [];
   let chunkOptions: string[] = [];
@@ -33,6 +37,7 @@
       splitFormat = cfg.defaultSplitFormat || '_NNN.pkgpart';
       language = (cfg.language as Locale) || 'en';
       emulatorFilesDir = cfg.emulatorFilesDir || '';
+      checkUpdatesOnStartup = cfg.checkUpdatesOnStartup ?? true;
       locale.set(language);
       loaded = true;
     })();
@@ -56,6 +61,7 @@
       defaultOutputDir: '',
       language,
       emulatorFilesDir,
+      checkUpdatesOnStartup,
     });
     addLog('success', $t('settings.saved'));
   }
@@ -102,6 +108,17 @@
     </div>
 
     <div class="section">
+      <h3>{$t('settings.updates')}</h3>
+      <label class="toggle-row">
+        <input type="checkbox" bind:checked={checkUpdatesOnStartup} />
+        <span>
+          <strong>{$t('settings.checkUpdatesOnStartup')}</strong>
+          <small>{$t('settings.checkUpdatesOnStartupHint')}</small>
+        </span>
+      </label>
+    </div>
+
+    <div class="section">
       <h3>{$t('settings.defaults')}</h3>
 
       <div class="form-grid">
@@ -126,6 +143,14 @@
           {/each}
         </select>
       </div>
+    </div>
+
+    <div class="section">
+      <h3>{$t('settings.about')}</h3>
+      <p class="hint">{$t('settings.aboutHint')}</p>
+      <button class="btn-browse about-button" on:click={() => dispatch('openAbout')}>
+        {$t('settings.aboutOpen')}
+      </button>
     </div>
 
     <div class="actions">
@@ -221,11 +246,42 @@
     border-color: var(--accent);
   }
 
+  .about-button {
+    align-self: flex-start;
+  }
+
   .hint {
     margin: 4px 0 0;
     font-size: 11px;
     color: var(--text-secondary);
     opacity: 0.7;
+  }
+
+  .toggle-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  .toggle-row input {
+    margin-top: 3px;
+    accent-color: var(--accent);
+  }
+
+  .toggle-row strong {
+    display: block;
+    margin-bottom: 3px;
+    font-weight: 600;
+  }
+
+  .toggle-row small {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.4;
   }
 
 </style>

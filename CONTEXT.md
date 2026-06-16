@@ -25,6 +25,10 @@ _Avoid_: treating each companion `.bin` file as a separate disc.
 The ordered set of logical discs for a multi-disc game. Disc 2 means the second CD or DVD in the game, not the second file referenced by a CUE sheet.
 _Avoid_: file set
 
+**Multi-bin CUE**:
+A CUE sheet that references multiple `.bin` files (one per track). Each `FILE` directive starts a new time base: `INDEX` times are relative to the start of that file, not absolute disc positions. When merged into a single `.bin`, the INDEX times must be recalculated as absolute sector offsets (`ComputeMergedTracks`). Single-bin CUEs use absolute INDEX times throughout.
+_Avoid_: assuming INDEX times are always absolute.
+
 ### PFS layering
 
 **PFS** (PlayStation File System):
@@ -95,6 +99,24 @@ _Avoid_: depending on network cover lookup for required `sce_sys` artwork.
 The runtime emulator files embedded in `core/fpkg/assets.dat` and extracted to the user config cache on first use. The cache is validated against the embedded manifest so app updates can refresh stale runtime files automatically.
 _Avoid_: requiring users to provide a `ps1hd` directory for normal PS1 fPKG creation.
 
+### Auto-update
+
+**Built-in updater**:
+The Windows/Linux (and macOS dev) update path in `core/update_builtin.go`. Checks GitHub Releases, compares semver, verifies `SHA256SUMS.txt`, and replaces the running executable.
+_Avoid_: calling this path "Sparkle".
+
+**Sparkle**:
+The macOS-only update framework embedded in release builds (`-tags sparkle`). Replaces the full `.app` bundle via a signed `appcast.xml` feed.
+_Avoid_: expecting Sparkle on Windows or Linux.
+
+**Appcast**:
+The RSS/XML feed Sparkle reads (`appcast.xml` on each GitHub Release, resolved through `/releases/latest/download/appcast.xml`).
+_Avoid_: `releases/download/latest/` (404).
+
+**EdDSA signing keys**:
+The Sparkle key pair used to sign update archives and the appcast. Generated once with Sparkle's `generate_keys`; public key in `SUPublicEDKey`, private key in GitHub Actions secrets.
+_Avoid_: committing private keys to the repository.
+
 **PS1HD data layout**:
 The PS1HD-compatible disc layout under `/app0/data/`. Each logical disc is stored as `discN.bin`, `discN.cue`, and `discN.toc`; `config-title.txt` points to `data/discN.bin`.
 _Avoid_: using `/app0/image/disc01.bin` for PS1HD packages.
@@ -164,7 +186,10 @@ The AES mode used for PFS encryption. Sectors 0–15 (first 64 KiB = header bloc
 - **PS1HD runtime config** points the emulator to the packaged **Disc image**
 - **PS1HD runtime modules** live under `/app0/sce_module/` inside the **Inner PFS**
 - **PS1HD data layout** stores each PS1 **Disc image** with its CUE and TOC sidecars
+- **Multi-bin CUE** INDEX times are relative per file; **ComputeMergedTracks** recalculates them as absolute positions after concatenation so the rewritten CUE and TOC match the merged `.bin`
 - **PS1 cover art** may populate `sce_sys/icon0.png`, but it is not required for package creation
+- **Built-in updater** verifies Win/Linux binaries against **SHA256SUMS.txt** on GitHub Releases
+- **Sparkle** updates the macOS **`.app` bundle**; the built-in updater only swaps the binary inside the bundle (dev builds)
 
 ## Example dialogue
 
@@ -207,6 +232,15 @@ The AES mode used for PFS encryption. Sectors 0–15 (first 64 KiB = header bloc
 > **Dev:** "The package installs but eboot.bin fails SELF auth with `sceSblAuthMgrAuthHeader:readHeader -37`."
 > **Domain expert:** "The eboot.bin SELF file is corrupted. Check the first 4 bytes — a valid PS4 SELF starts with `4f153d1d` or `7f534345`. If the first ~1 MB is zeros, the file was extracted incorrectly from a reference PKG. Re-extract with PkgTool.Core after patching pfs_flags from 0xA0 to 0x80 in a copy of the PKG (the PS4 uses raw EKPFS regardless of bit 61, but PkgTool.Core follows the flag for key derivation)."
 
+> **Dev:** "Single-track PS1 games work, but multi-track games freeze on the publisher logo with the CDDA music still playing in the background."
+> **Domain expert:** "The data track boots fine (logo + audio), but data reads beyond track 1 hit wrong sectors. In a multi-bin CUE, each `FILE` has its own time base — INDEX times are relative to each file, not absolute disc positions. When the BINs are concatenated into a single `discN.bin`, `RewritePS1CueForPackage` and `GeneratePS1TOC` must use `ComputeMergedTracks` to recalculate the INDEX times as absolute sector offsets within the merged image. Without recalculation, the CUE and TOC point at wrong sectors and the emulator stalls."
+
+> **Dev:** "Sparkle never offers an update, but GitHub has a newer release."
+> **Domain expert:** "Check three things: `appcast.xml` is attached to the latest release and the feed URL uses `releases/latest/download/appcast.xml`; `SUPublicEDKey` in the installed app matches the key that signed the appcast; and `info.productVersion` / `CFBundleVersion` match `sparkle:version`. See `docs/auto-update.md`."
+
+> **Dev:** "Why does macOS use Sparkle but Windows uses a custom updater?"
+> **Domain expert:** "Sparkle replaces the full `.app` bundle, which matters for icons and plist on macOS. Windows and Linux ship a single executable, so the built-in GitHub + SHA256 path is enough. See ADR 0018."
+
 ## Flagged ambiguities
 
 - "PFS" is used loosely to mean either the filesystem format or a specific PFS image instance. Resolved: capitalize "PFS" for the format, use "inner PFS" / "outer PFS" for specific images.
@@ -216,3 +250,5 @@ The AES mode used for PFS encryption. Sectors 0–15 (first 64 KiB = header bloc
 - "Application Type" should not be confused with `CATEGORY=gd` or PKG content type. It is the SFO app model used by the launcher.
 - "PS1 emulator config" was used ambiguously for `config-emu-ps4.txt` and `config-title.txt`. Resolved: PS1HD uses `config-title.txt`; PS2 uses `config-emu-ps4.txt`.
 - "PS1 disc file" was used ambiguously for either the raw BIN or the PS1HD runtime bundle. Resolved: PS1HD packages include the BIN plus package-local CUE and TOC sidecars under `data/`.
+- "INDEX times" in a CUE sheet were assumed to be absolute disc positions. Resolved: in multi-bin CUEs each `FILE` starts a new time base, so INDEX times are relative to each file; `ComputeMergedTracks` recalculates them as absolute positions after concatenation.
+- "Auto-update" was used ambiguously for Sparkle and the built-in GitHub updater. Resolved: Sparkle on macOS release builds; built-in updater on Windows/Linux and macOS dev builds.

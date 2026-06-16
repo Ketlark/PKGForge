@@ -281,6 +281,26 @@ func (a *App) ChunkLabels() []string       { return core.ChunkLabels() }
 func (a *App) SplitFormatLabels() []string { return core.SplitFormatLabels() }
 func (a *App) FormatSize(b int64) string   { return core.FormatSize(b) }
 
+// --- Auto-update ---
+
+func (a *App) AppVersion() string { return Version }
+
+func (a *App) UpdateBackend() string { return core.UpdateBackend() }
+
+func (a *App) ConfigureUpdateOnStartup(enabled bool) {
+	core.ConfigureUpdateOnStartup(enabled)
+}
+
+func (a *App) CheckForUpdates() (*core.UpdateInfo, error) {
+	return core.CheckForUpdate(a.ctx, Version)
+}
+
+func (a *App) DownloadAndApplyUpdate(info *core.UpdateInfo) error {
+	return core.DownloadAndApplyUpdate(a.ctx, info, func(p float64) {
+		runtime.EventsEmit(a.ctx, "update-progress", p)
+	})
+}
+
 // ---------------------------------------------------------------------------
 // PS1 fPKG bindings
 // ---------------------------------------------------------------------------

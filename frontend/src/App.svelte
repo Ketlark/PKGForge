@@ -7,12 +7,16 @@
   import PS2Page from './lib/components/PS2Page.svelte';
   import ActivityLog from './lib/components/ActivityLog.svelte';
   import SettingsPage from './lib/components/SettingsPage.svelte';
+  import AboutPage from './lib/components/AboutPage.svelte';
+  import appIcon from './assets/pkg-forge-icon.png';
   import { logCount } from './lib/stores/activity';
   import { t, locale } from './lib/stores/i18n';
   import type { Locale } from './lib/stores/i18n';
+  import { updateBadge } from './lib/stores/update';
+  import { initUpdateOnStartup } from './lib/stores/update';
   import { LoadConfig } from '../wailsjs/go/main/App';
 
-  type Tab = 'merge' | 'split' | 'inspect' | 'ps1' | 'ps2' | 'activity' | 'settings';
+  type Tab = 'merge' | 'split' | 'inspect' | 'ps1' | 'ps2' | 'activity' | 'settings' | 'about';
   let activeTab: Tab = 'merge';
 
   $: tabs = [
@@ -32,8 +36,10 @@
         if (cfg.language === 'fr' || cfg.language === 'en') {
           locale.set(cfg.language as Locale);
         }
+        const checkOnStartup = cfg.checkUpdatesOnStartup ?? true;
+        await initUpdateOnStartup(checkOnStartup);
       } catch {
-        /* keep default locale */
+        await initUpdateOnStartup(true);
       }
     })();
 
@@ -43,6 +49,9 @@
         if (idx >= 0 && idx < tabs.length) {
           e.preventDefault();
           activeTab = tabs[idx].id;
+        } else if (e.key === '8') {
+          e.preventDefault();
+          activeTab = 'about';
         }
       }
     }
@@ -54,7 +63,7 @@
 <div class="shell">
   <header class="header">
     <div class="header-title">
-      <span class="header-icon">🎮</span>
+      <img class="header-icon" src={appIcon} alt="" aria-hidden="true" />
       <span class="header-text">{$t('app.title')}</span>
     </div>
     <nav class="tab-bar">
@@ -63,7 +72,7 @@
           class="tab"
           class:active={activeTab === tab.id}
           on:click={() => (activeTab = tab.id)}
-          title="⌘{tab.shortcut}"
+          title="⌘/Ctrl+{tab.shortcut}"
         >
           <span class="tab-icon">{tab.icon}</span>
           <span class="tab-label">{tab.label}</span>
@@ -88,14 +97,29 @@
       <PS2Page />
     {:else if activeTab === 'activity'}
       <ActivityLog />
+    {:else if activeTab === 'settings'}
+      <SettingsPage on:openAbout={() => (activeTab = 'about')} />
     {:else}
-      <SettingsPage />
+      <AboutPage />
     {/if}
   </main>
 
   <footer class="status-bar">
-    <span>{$t('app.subtitle')}</span>
-    <span class="shortcuts-hint">⌘1-7 tabs</span>
+    <div class="status-left">
+      <span>{$t('app.subtitle')}</span>
+      <button
+        class="status-link"
+        class:active={activeTab === 'about'}
+        on:click={() => (activeTab = 'about')}
+        title="⌘/Ctrl+8"
+      >
+        {$t('tab.about')}
+        {#if $updateBadge}
+          <span class="update-dot" title={$t('about.updateBadge')}></span>
+        {/if}
+      </button>
+    </div>
+    <span class="shortcuts-hint">⌘/Ctrl+1-7 tabs · 8 {$t('tab.about')}</span>
   </footer>
 </div>
 
@@ -126,7 +150,10 @@
   }
 
   .header-icon {
-    font-size: 16px;
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 8px rgba(74, 125, 255, 0.22));
   }
 
   .header-text {
@@ -140,13 +167,14 @@
     display: flex;
     gap: 2px;
     -webkit-app-region: no-drag;
+    min-width: 0;
   }
 
   .tab {
     display: flex;
     align-items: center;
     gap: 5px;
-    padding: 6px 12px;
+    padding: 6px 10px;
     font-size: 12px;
     font-weight: 500;
     font-family: var(--font);
@@ -200,6 +228,7 @@
 
   .status-bar {
     display: flex;
+    align-items: center;
     justify-content: space-between;
     padding: 4px 16px;
     font-size: 11px;
@@ -207,6 +236,42 @@
     background: var(--bg-surface);
     border-top: 1px solid var(--border);
     flex-shrink: 0;
+  }
+
+  .status-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .status-link {
+    padding: 0;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0.75;
+    -webkit-app-region: no-drag;
+  }
+
+  .status-link:hover,
+  .status-link.active {
+    color: var(--accent-light);
+    opacity: 1;
+  }
+
+  .update-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
+    vertical-align: middle;
   }
 
   .shortcuts-hint {

@@ -6,6 +6,15 @@
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
+  "postBuildHooks": {
+    "darwin/*": "bash scripts/embed-sparkle.sh ${bin}"
+  },
+  "info": {
+    "companyName": "Ketlark",
+    "productName": "PKG Forge",
+    "productVersion": "0.0.0-dev",
+    "copyright": "Copyright Ketlark"
+  },
   "author": {
     "name": "Ketlark",
     "email": ""

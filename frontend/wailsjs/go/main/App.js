@@ -6,6 +6,10 @@ export function AddHistoryEntry(arg1) {
   return window['go']['main']['App']['AddHistoryEntry'](arg1);
 }
 
+export function AppVersion() {
+  return window['go']['main']['App']['AppVersion']();
+}
+
 export function BufferLabels() {
   return window['go']['main']['App']['BufferLabels']();
 }
@@ -22,12 +26,20 @@ export function CheckDiskSpace(arg1) {
   return window['go']['main']['App']['CheckDiskSpace'](arg1);
 }
 
+export function CheckForUpdates() {
+  return window['go']['main']['App']['CheckForUpdates']();
+}
+
 export function ChunkLabels() {
   return window['go']['main']['App']['ChunkLabels']();
 }
 
 export function ClearHistory() {
   return window['go']['main']['App']['ClearHistory']();
+}
+
+export function ConfigureUpdateOnStartup(arg1) {
+  return window['go']['main']['App']['ConfigureUpdateOnStartup'](arg1);
 }
 
 export function CreatePS1FPKG(arg1) {
@@ -52,6 +64,10 @@ export function DetectPS2Disc(arg1) {
 
 export function DetectParts(arg1) {
   return window['go']['main']['App']['DetectParts'](arg1);
+}
+
+export function DownloadAndApplyUpdate(arg1) {
+  return window['go']['main']['App']['DownloadAndApplyUpdate'](arg1);
 }
 
 export function FormatSize(arg1) {
@@ -132,6 +148,10 @@ export function SuggestOutputPath(arg1, arg2) {
 
 export function SuggestRenamePKG(arg1) {
   return window['go']['main']['App']['SuggestRenamePKG'](arg1);
+}
+
+export function UpdateBackend() {
+  return window['go']['main']['App']['UpdateBackend']();
 }
 
 export function ValidatePKG(arg1) {

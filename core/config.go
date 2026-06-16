@@ -8,22 +8,25 @@ import (
 
 // Config holds user preferences.
 type Config struct {
-	DefaultBufferLabel string `json:"defaultBufferLabel"`
-	DefaultChunkLabel  string `json:"defaultChunkLabel"`
-	DefaultSplitFormat string `json:"defaultSplitFormat"`
-	DefaultOutputDir   string `json:"defaultOutputDir"`
-	Language           string `json:"language"`
-	EmulatorFilesDir   string `json:"emulatorFilesDir"`
+	DefaultBufferLabel   string `json:"defaultBufferLabel"`
+	DefaultChunkLabel    string `json:"defaultChunkLabel"`
+	DefaultSplitFormat   string `json:"defaultSplitFormat"`
+	DefaultOutputDir     string `json:"defaultOutputDir"`
+	Language             string `json:"language"`
+	EmulatorFilesDir     string `json:"emulatorFilesDir"`
+	CheckUpdatesOnStartup *bool  `json:"checkUpdatesOnStartup,omitempty"`
 }
 
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() Config {
+	defaults := true
 	return Config{
-		DefaultBufferLabel: "64 MB",
-		DefaultChunkLabel:  "4 GB",
-		DefaultSplitFormat: "_NNN.pkgpart",
-		DefaultOutputDir:   "",
-		Language:           "en",
+		DefaultBufferLabel:   "64 MB",
+		DefaultChunkLabel:    "4 GB",
+		DefaultSplitFormat:   "_NNN.pkgpart",
+		DefaultOutputDir:     "",
+		Language:             "en",
+		CheckUpdatesOnStartup: &defaults,
 	}
 }
 
@@ -74,6 +77,9 @@ func LoadConfig() Config {
 	}
 	if cfg.DefaultSplitFormat == "" {
 		cfg.DefaultSplitFormat = defaults.DefaultSplitFormat
+	}
+	if cfg.CheckUpdatesOnStartup == nil {
+		cfg.CheckUpdatesOnStartup = defaults.CheckUpdatesOnStartup
 	}
 	return cfg
 }

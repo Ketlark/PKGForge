@@ -2,7 +2,11 @@ module pkg-forge
 
 go 1.23.0
 
-require github.com/wailsapp/wails/v2 v2.12.0
+require (
+	github.com/abemedia/go-sparkle v0.2.0
+	github.com/wailsapp/wails/v2 v2.12.0
+	golang.org/x/mod v0.23.0
+)
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect

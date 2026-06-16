@@ -386,3 +386,179 @@ func TestExtractPS2GameIDFromPathWithSubdirectory(t *testing.T) {
 		t.Fatalf("game ID = %q, want SLUS-20062", got)
 	}
 }
+
+// --- Multi-bin LBA recalculation tests ---
+
+func TestComputeMergedTracksSingleBinUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	binPath := filepath.Join(dir, "game.bin")
+
+	// Single-bin: all INDEX times are already absolute.
+	data := make([]byte, 2352*18000)
+	if err := os.WriteFile(binPath, data, 0644); err != nil {
+		t.Fatalf("write bin: %v", err)
+	}
+
+	tracks := []CueTrack{
+		{Number: 1, Mode: "MODE2/2352", File: binPath, StartLBA: 0, PregapLBA: -1},
+		{Number: 2, Mode: "AUDIO", File: binPath, StartLBA: 15000, PregapLBA: 14850},
+	}
+
+	merged, err := ComputeMergedTracks(tracks)
+	if err != nil {
+		t.Fatalf("ComputeMergedTracks: %v", err)
+	}
+	if merged[0].StartLBA != 0 || merged[1].StartLBA != 15000 {
+		t.Fatalf("single-bin LBAs should be unchanged: got %d/%d", merged[0].StartLBA, merged[1].StartLBA)
+	}
+	if merged[1].PregapLBA != 14850 {
+		t.Fatalf("single-bin PregapLBA should be unchanged: got %d", merged[1].PregapLBA)
+	}
+}
+
+func TestComputeMergedTracksMultiBinAdjustsLBAs(t *testing.T) {
+	dir := t.TempDir()
+	bin1 := filepath.Join(dir, "track01.bin")
+	bin2 := filepath.Join(dir, "track02.bin")
+
+	// Track 1: 300 sectors of MODE2/2352 data.
+	// Track 2: 200 sectors of AUDIO with a 150-sector pregap inside the file.
+	sectors1 := 300
+	sectors2 := 200
+	if err := os.WriteFile(bin1, make([]byte, 2352*sectors1), 0644); err != nil {
+		t.Fatalf("write bin1: %v", err)
+	}
+	if err := os.WriteFile(bin2, make([]byte, 2352*sectors2), 0644); err != nil {
+		t.Fatalf("write bin2: %v", err)
+	}
+
+	// Multi-bin CUE: each FILE has its own time base.
+	tracks := []CueTrack{
+		{Number: 1, Mode: "MODE2/2352", File: bin1, StartLBA: 0, PregapLBA: -1},
+		{Number: 2, Mode: "AUDIO", File: bin2, StartLBA: 150, PregapLBA: 0},
+	}
+
+	merged, err := ComputeMergedTracks(tracks)
+	if err != nil {
+		t.Fatalf("ComputeMergedTracks: %v", err)
+	}
+
+	// Track 1 is at the start: absolute LBA 0.
+	if merged[0].StartLBA != 0 {
+		t.Fatalf("track 1 StartLBA = %d, want 0", merged[0].StartLBA)
+	}
+
+	// Track 2: file starts at sector 300 (after track 1's 300 sectors).
+	// Pregap at sector 0 within the file → absolute 300.
+	// Data at sector 150 within the file → absolute 450.
+	if merged[1].PregapLBA != 300 {
+		t.Fatalf("track 2 PregapLBA = %d, want 300", merged[1].PregapLBA)
+	}
+	if merged[1].StartLBA != 450 {
+		t.Fatalf("track 2 StartLBA = %d, want 450", merged[1].StartLBA)
+	}
+}
+
+func TestComputeMergedTracksThreeTracksAllAtFileStart(t *testing.T) {
+	dir := t.TempDir()
+	bin1 := filepath.Join(dir, "track01.bin")
+	bin2 := filepath.Join(dir, "track02.bin")
+	bin3 := filepath.Join(dir, "track03.bin")
+
+	// Common multi-bin pattern: each track in its own file, INDEX 01 00:00:00.
+	s1, s2, s3 := 100, 200, 150
+	os.WriteFile(bin1, make([]byte, 2352*s1), 0644)
+	os.WriteFile(bin2, make([]byte, 2352*s2), 0644)
+	os.WriteFile(bin3, make([]byte, 2352*s3), 0644)
+
+	tracks := []CueTrack{
+		{Number: 1, Mode: "MODE2/2352", File: bin1, StartLBA: 0, PregapLBA: -1},
+		{Number: 2, Mode: "AUDIO", File: bin2, StartLBA: 0, PregapLBA: -1},
+		{Number: 3, Mode: "AUDIO", File: bin3, StartLBA: 0, PregapLBA: -1},
+	}
+
+	merged, err := ComputeMergedTracks(tracks)
+	if err != nil {
+		t.Fatalf("ComputeMergedTracks: %v", err)
+	}
+
+	want := []int{0, s1, s1 + s2}
+	for i, w := range want {
+		if merged[i].StartLBA != w {
+			t.Fatalf("track %d StartLBA = %d, want %d", i+1, merged[i].StartLBA, w)
+		}
+	}
+}
+
+func TestRewritePS1CueForPackageWithMergedTracks(t *testing.T) {
+	dir := t.TempDir()
+	bin1 := filepath.Join(dir, "track01.bin")
+	bin2 := filepath.Join(dir, "track02.bin")
+
+	// 300 sectors + 200 sectors
+	os.WriteFile(bin1, make([]byte, 2352*300), 0644)
+	os.WriteFile(bin2, make([]byte, 2352*200), 0644)
+
+	tracks := []CueTrack{
+		{Number: 1, Mode: "MODE2/2352", File: bin1, StartLBA: 0, PregapLBA: -1},
+		{Number: 2, Mode: "AUDIO", File: bin2, StartLBA: 150, PregapLBA: 0},
+	}
+
+	merged, err := ComputeMergedTracks(tracks)
+	if err != nil {
+		t.Fatalf("ComputeMergedTracks: %v", err)
+	}
+
+	cue := RewritePS1CueForPackage(merged, 1)
+
+	// Track 1 INDEX 01 = 00:00:00 (LBA 0)
+	// Track 2 INDEX 00 = 00:04:00 (LBA 300 = 4*75)
+	// Track 2 INDEX 01 = 00:06:00 (LBA 450 = 6*75)
+	for _, want := range []string{
+		`FILE "disc1.bin" BINARY`,
+		"INDEX 01 00:00:00",
+		"INDEX 00 00:04:00",
+		"INDEX 01 00:06:00",
+	} {
+		if !strings.Contains(cue, want) {
+			t.Fatalf("rewritten cue missing %q:\n%s", want, cue)
+		}
+	}
+}
+
+func TestMergeBinsCopiesEachFileOnce(t *testing.T) {
+	dir := t.TempDir()
+	bin1 := filepath.Join(dir, "track01.bin")
+	bin2 := filepath.Join(dir, "track02.bin")
+
+	data1 := make([]byte, 2352*100)
+	data2 := make([]byte, 2352*50)
+	for i := range data1 {
+		data1[i] = 0xAA
+	}
+	for i := range data2 {
+		data2[i] = 0xBB
+	}
+	os.WriteFile(bin1, data1, 0644)
+	os.WriteFile(bin2, data2, 0644)
+
+	// Two tracks referencing the same first file (single-bin layout, but
+	// MergeBins should still only copy each unique file once).
+	tracks := []CueTrack{
+		{Number: 1, Mode: "MODE2/2352", File: bin1, StartLBA: 0, PregapLBA: -1},
+		{Number: 2, Mode: "AUDIO", File: bin1, StartLBA: 100, PregapLBA: -1},
+		{Number: 3, Mode: "AUDIO", File: bin2, StartLBA: 0, PregapLBA: -1},
+	}
+
+	outPath := filepath.Join(dir, "merged.bin")
+	total, err := MergeBins(tracks, outPath)
+	if err != nil {
+		t.Fatalf("MergeBins: %v", err)
+	}
+
+	// Should be bin1 + bin2 = 150 sectors, NOT bin1 + bin1 + bin2.
+	wantSize := int64(2352 * 150)
+	if total != wantSize {
+		t.Fatalf("merged size = %d, want %d (each file copied once)", total, wantSize)
+	}
+}

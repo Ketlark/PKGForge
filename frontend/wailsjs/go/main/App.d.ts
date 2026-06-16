@@ -5,6 +5,8 @@ import {main} from '../models';
 
 export function AddHistoryEntry(arg1:core.HistoryEntry):Promise<void>;
 
+export function AppVersion():Promise<string>;
+
 export function BufferLabels():Promise<Array<string>>;
 
 export function CalculateChecksum(arg1:string):Promise<core.ChecksumResult>;
@@ -13,9 +15,13 @@ export function CancelOperation():Promise<void>;
 
 export function CheckDiskSpace(arg1:string):Promise<core.DiskSpaceInfo>;
 
+export function CheckForUpdates():Promise<core.UpdateInfo>;
+
 export function ChunkLabels():Promise<Array<string>>;
 
 export function ClearHistory():Promise<void>;
+
+export function ConfigureUpdateOnStartup(arg1:boolean):Promise<void>;
 
 export function CreatePS1FPKG(arg1:main.PS1FPKGRequest):Promise<void>;
 
@@ -28,6 +34,8 @@ export function DetectPS1Disc(arg1:string):Promise<main.PS1DiscDetectResult>;
 export function DetectPS2Disc(arg1:string):Promise<main.PS2DiscDetectResult>;
 
 export function DetectParts(arg1:string):Promise<main.DetectResult>;
+
+export function DownloadAndApplyUpdate(arg1:core.UpdateInfo):Promise<void>;
 
 export function FormatSize(arg1:number):Promise<string>;
 
@@ -68,5 +76,7 @@ export function SplitFormatLabels():Promise<Array<string>>;
 export function SuggestOutputPath(arg1:Array<string>,arg2:string):Promise<string>;
 
 export function SuggestRenamePKG(arg1:string):Promise<main.RenameResult>;
+
+export function UpdateBackend():Promise<string>;
 
 export function ValidatePKG(arg1:string):Promise<main.ValidationResult>;

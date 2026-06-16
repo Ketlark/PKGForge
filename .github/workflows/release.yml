@@ -54,14 +54,22 @@ jobs:
         run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Sync product version
+        id: version
+        shell: bash
+        run: |
+          chmod +x scripts/sync-product-version.sh
+          VERSION=$(scripts/sync-product-version.sh "${{ github.ref_name }}")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Install Linux build dependencies
         if: matrix.package == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
-          # Wails CGO asks pkg-config for webkit2gtk-4.0; Ubuntu 24.04+ only ships 4.1 (.pc).
           for d in /usr/lib/x86_64-linux-gnu/pkgconfig /usr/lib/aarch64-linux-gnu/pkgconfig; do
             if [ -f "$d/webkit2gtk-4.1.pc" ] && [ ! -e "$d/webkit2gtk-4.0.pc" ]; then
               sudo ln -sf webkit2gtk-4.1.pc "$d/webkit2gtk-4.0.pc"
@@ -73,9 +81,47 @@ jobs:
         run: npm ci
 
       - name: wails build
-        run: wails build -platform ${{ matrix.platform }} -clean
+        if: matrix.package != 'mac'
+        run: wails build -platform ${{ matrix.platform }} -clean -ldflags "-X main.Version=${{ steps.version.outputs.version }}"
 
-      # Direct downloadable assets (no extra zip/tar for Win/Linux; macOS stays .zip for .app bundle)
+      - name: Import Apple signing certificate
+        if: matrix.package == 'mac'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "Apple signing certificate not configured, skipping"
+            exit 0
+          fi
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: wails build (macOS + Sparkle)
+        if: matrix.package == 'mac'
+        env:
+          CGO_ENABLED: "1"
+          CGO_LDFLAGS: "-Wl,-rpath,@loader_path/../Frameworks"
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          chmod +x scripts/embed-sparkle.sh scripts/sign-macos-app.sh
+          wails build -platform ${{ matrix.platform }} -clean -tags sparkle -ldflags "-X main.Version=${{ steps.version.outputs.version }}"
+          APP=$(find build/bin -maxdepth 1 -name "*.app" | head -1)
+          if [ -n "$SPARKLE_PUBLIC_ED_KEY" ] && [ -n "$APP" ]; then
+            /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_PUBLIC_ED_KEY" "$APP/Contents/Info.plist"
+          fi
+          if [ -n "$APPLE_SIGNING_IDENTITY" ] && [ -n "$APP" ]; then
+            scripts/sign-macos-app.sh "$APP"
+          fi
+
       - name: Prepare artifact (Windows)
         if: matrix.package == 'win'
         shell: bash
@@ -88,8 +134,19 @@ jobs:
         run: |
           APP=$(find build/bin -maxdepth 1 -name "*.app" | head -1)
           if [ -z "$APP" ]; then echo "No .app in build/bin"; ls -la build/bin; exit 1; fi
-          ditto -c -k --keepParent "$APP" pkg-forge-macos-universal.zip
+          ditto -c -k --sequesterRsrc --keepParent "$APP" pkg-forge-macos-universal.zip
           echo "PACKAGED=pkg-forge-macos-universal.zip" >> "$GITHUB_ENV"
+
+      - name: Notarize macOS app
+        if: matrix.package == 'mac'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          chmod +x scripts/notarize-macos-app.sh
+          scripts/notarize-macos-app.sh pkg-forge-macos-universal.zip
 
       - name: Prepare artifact (Linux)
         if: matrix.package == 'linux'
@@ -111,11 +168,20 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      - name: Install Sparkle tools
+        run: |
+          SPARKLE_VERSION=2.6.4
+          curl -fsSL -o sparkle.tar.xz "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          tar xf sparkle.tar.xz
+          echo "$(pwd)/bin" >> "$GITHUB_PATH"
 
       - name: Generate SHA256SUMS
         working-directory: dist
@@ -124,14 +190,22 @@ jobs:
           sha256sum pkg-forge-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      - name: Generate Sparkle appcast
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          chmod +x scripts/generate-appcast.sh
+          bash scripts/generate-appcast.sh dist
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           draft: false
           generate_release_notes: true
-          # Default overwrite_files=true replaces assets with the same name on re-run
           files: |
             dist/pkg-forge-*
             dist/SHA256SUMS.txt
+            dist/appcast.xml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

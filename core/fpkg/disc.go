@@ -529,7 +529,9 @@ func readSystemCNFFromBin(f *os.File, track *CueTrack) ([]byte, error) {
 // ---------------------------------------------------------------------------
 
 // MergeBins concatenates multiple .bin files from a CUE sheet into a single file.
-// Returns the path to the merged file and the total size.
+// Files are copied in the order they first appear in the track list, each file
+// copied exactly once (even when multiple tracks reference the same file).
+// Returns the total size.
 func MergeBins(tracks []CueTrack, outputPath string) (int64, error) {
 	out, err := os.Create(outputPath)
 	if err != nil {
@@ -538,21 +540,73 @@ func MergeBins(tracks []CueTrack, outputPath string) (int64, error) {
 	defer out.Close()
 
 	var total int64
-	for _, track := range tracks {
-		f, err := os.Open(track.File)
+	for i, file := range getUniqueBinFiles(tracks) {
+		f, err := os.Open(file)
 		if err != nil {
-			return 0, fmt.Errorf("open track %d bin %s: %w", track.Number, track.File, err)
+			return 0, fmt.Errorf("open bin file %d %s: %w", i+1, file, err)
 		}
 
 		n, err := io.Copy(out, f)
 		f.Close()
 		if err != nil {
-			return 0, fmt.Errorf("copy track %d: %w", track.Number, err)
+			return 0, fmt.Errorf("copy bin file %d: %w", i+1, err)
 		}
 		total += n
 	}
 
 	return total, nil
+}
+
+// ComputeMergedTracks adjusts track LBAs for a merged single-bin image.
+//
+// In multi-bin CUE sheets, each FILE has its own time base: INDEX times are
+// relative to the start of each individual .bin file.  When the files are
+// concatenated into a single .bin, the INDEX times must be recalculated as
+// absolute sector positions within the merged file, otherwise the rewritten
+// CUE and generated TOC will point at wrong sectors.
+//
+// For single-bin CUE sheets the LBAs are already absolute and are returned
+// unchanged.
+func ComputeMergedTracks(tracks []CueTrack) ([]CueTrack, error) {
+	if len(tracks) == 0 {
+		return tracks, nil
+	}
+
+	// Single-bin: LBAs are already absolute.
+	uniqueFiles := getUniqueBinFiles(tracks)
+	if len(uniqueFiles) <= 1 {
+		return tracks, nil
+	}
+
+	// Compute the absolute sector offset of each unique file in the merged
+	// image.  Files appear in first-reference order, matching MergeBins.
+	fileOffset := make(map[string]int)
+	cumulative := 0
+	for _, file := range uniqueFiles {
+		fileOffset[file] = cumulative
+		info, err := os.Stat(file)
+		if err != nil {
+			return nil, fmt.Errorf("stat bin file %s: %w", file, err)
+		}
+		size := info.Size()
+		sectors := int(size / 2352)
+		if size%2352 != 0 && size%2048 == 0 {
+			sectors = int(size / 2048)
+		}
+		cumulative += sectors
+	}
+
+	// Build adjusted tracks with absolute LBAs.
+	result := make([]CueTrack, len(tracks))
+	for i, t := range tracks {
+		result[i] = t
+		offset := fileOffset[t.File]
+		result[i].StartLBA = offset + t.StartLBA
+		if t.PregapLBA >= 0 {
+			result[i].PregapLBA = offset + t.PregapLBA
+		}
+	}
+	return result, nil
 }
 
 // ---------------------------------------------------------------------------

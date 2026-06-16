@@ -798,9 +798,16 @@ func BuildPS1Project(opts PS1FPKGOptions) (map[string][]byte, *PS1DiscResult, er
 		}
 		discData = data
 	}
+	// Adjust track LBAs for the merged-image layout (multi-bin → single-bin).
+	// In multi-bin CUEs, INDEX times are relative to each .bin file; after
+	// concatenation they must be recalculated as absolute sector positions.
+	adjustedTracks, err := ComputeMergedTracks(tracks)
+	if err != nil {
+		return nil, nil, fmt.Errorf("compute merged tracks for disc 1: %w", err)
+	}
 	files[ps1DataBinPath(1)] = discData
-	files[ps1DataCuePath(1)] = []byte(RewritePS1CueForPackage(tracks, 1))
-	files[ps1DataTOCPath(1)] = GeneratePS1TOC(tracks, int64(len(discData)))
+	files[ps1DataCuePath(1)] = []byte(RewritePS1CueForPackage(adjustedTracks, 1))
+	files[ps1DataTOCPath(1)] = GeneratePS1TOC(adjustedTracks, int64(len(discData)))
 
 	// Extra discs
 	for i, extraCue := range opts.ExtraDiscs {
@@ -833,9 +840,13 @@ func BuildPS1Project(opts PS1FPKGOptions) (map[string][]byte, *PS1DiscResult, er
 			}
 			extraData = data
 		}
+		adjustedExtra, err := ComputeMergedTracks(extraTracks)
+		if err != nil {
+			return nil, nil, fmt.Errorf("compute merged tracks for disc %d: %w", discNum, err)
+		}
 		files[ps1DataBinPath(discNum)] = extraData
-		files[ps1DataCuePath(discNum)] = []byte(RewritePS1CueForPackage(extraTracks, discNum))
-		files[ps1DataTOCPath(discNum)] = GeneratePS1TOC(extraTracks, int64(len(extraData)))
+		files[ps1DataCuePath(discNum)] = []byte(RewritePS1CueForPackage(adjustedExtra, discNum))
+		files[ps1DataTOCPath(discNum)] = GeneratePS1TOC(adjustedExtra, int64(len(extraData)))
 	}
 
 	if opts.OnProgress != nil {

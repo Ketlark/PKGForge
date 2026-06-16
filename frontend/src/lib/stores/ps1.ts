@@ -119,6 +119,8 @@ export function clearPS1DiscSelection() {
   ps1OutputPath.set('');
   ps1Title.set('');
   ps1TitleID.set('');
+  ps1Icon0.set('');
+  ps1Pic1.set('');
   ps1Error.set('');
   ps1Progress.set(normalizeFPKGProgress(0));
   resetPS1Detection();
@@ -140,7 +142,7 @@ export async function detectPS1Disc(cuePath: string) {
 
       if (result.gameID) ps1TitleID.set(result.gameID);
       if (result.title) ps1Title.set(result.title);
-      if (result.coverPath && !get(ps1Icon0)) ps1Icon0.set(result.coverPath);
+      ps1Icon0.set(result.coverPath || '');
     }
   } catch (e: any) {
     ps1Error.set(e?.toString() || 'Detection failed');
