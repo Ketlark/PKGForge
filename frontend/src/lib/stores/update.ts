@@ -44,6 +44,14 @@ export const updateBusy = derived(
   ($s) => $s === 'checking' || $s === 'downloading'
 );
 
+/** Human-readable version label for UI (e.g. v1.3.0 or devLabel). */
+export function formatDisplayVersion(version: string, devLabel: string): string {
+  if (!version || version === 'dev' || version.startsWith('dev')) {
+    return devLabel;
+  }
+  return version.startsWith('v') ? version : `v${version}`;
+}
+
 let progressUnsub: (() => void) | null = null;
 
 function clearProgressListener() {

@@ -16,6 +16,7 @@
     loadAppVersion,
     updateBadge,
     updateBackend,
+    formatDisplayVersion,
   } from '../stores/update';
 
   const links = [
@@ -50,10 +51,7 @@
   }
 
   function formatVersion(version: string) {
-    if (!version || version === 'dev' || version.startsWith('dev')) {
-      return $t('about.versionDev');
-    }
-    return version.startsWith('v') ? version : `v${version}`;
+    return formatDisplayVersion(version, $t('about.versionDev'));
   }
 
   function tWithVersion(key: string, version: string) {

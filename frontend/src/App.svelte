@@ -12,12 +12,13 @@
   import { logCount } from './lib/stores/activity';
   import { t, locale } from './lib/stores/i18n';
   import type { Locale } from './lib/stores/i18n';
-  import { updateBadge } from './lib/stores/update';
-  import { initUpdateOnStartup } from './lib/stores/update';
+  import { updateBadge, initUpdateOnStartup, currentVersion, formatDisplayVersion } from './lib/stores/update';
   import { LoadConfig } from '../wailsjs/go/main/App';
 
   type Tab = 'merge' | 'split' | 'inspect' | 'ps1' | 'ps2' | 'activity' | 'settings' | 'about';
   let activeTab: Tab = 'merge';
+
+  $: displayVersion = formatDisplayVersion($currentVersion, $t('about.versionDev'));
 
   $: tabs = [
     { id: 'merge' as Tab, label: $t('tab.merge'), icon: '📦', shortcut: '1' },
@@ -119,7 +120,10 @@
         {/if}
       </button>
     </div>
-    <span class="shortcuts-hint">⌘/Ctrl+1-7 tabs · 8 {$t('tab.about')}</span>
+    <div class="status-right">
+      <span class="status-version" title="{$t('about.version')}">{displayVersion}</span>
+      <span class="shortcuts-hint">⌘/Ctrl+1-7 tabs · 8 {$t('tab.about')}</span>
+    </div>
   </footer>
 </div>
 
@@ -278,5 +282,20 @@
     font-size: 10px;
     color: var(--text-muted);
     opacity: 0.6;
+  }
+
+  .status-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .status-version {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent-light);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.85;
   }
 </style>

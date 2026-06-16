@@ -6,11 +6,9 @@
 
 Merge, split, inspect, checksum, rename, and build PS1/PS2 fPKGs from one cross-platform app.
 
-[![Latest release](https://img.shields.io/github/v/release/Ketlark/PKGForge?style=for-the-badge&logo=github&label=release)](https://github.com/Ketlark/PKGForge/releases/latest)
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev/)
-[![Wails](https://img.shields.io/badge/Wails-v2-ff3e00?style=for-the-badge)](https://wails.io/)
-[![Platforms](https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-242938?style=for-the-badge)](https://github.com/Ketlark/PKGForge/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-f2c94c?style=for-the-badge)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/Ketlark/PKGForge?style=flat-square&logo=github)](https://github.com/Ketlark/PKGForge/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
+[![Platforms](https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square)](https://github.com/Ketlark/PKGForge/releases/latest)
 
 [Download latest release](https://github.com/Ketlark/PKGForge/releases/latest) ·
 [Features](#features) ·
@@ -52,16 +50,15 @@ If PKG Forge saves you time, the most useful support is to:
 - Report reproducible bugs or edge cases in [Issues](https://github.com/Ketlark/PKGForge/issues).
 - Use [GitHub Sponsors](https://github.com/sponsors/Ketlark) if direct sponsorship is available for the creator.
 
-## Latest changes
-
-Recent work on `main` since v1.2.0:
+## What is new in v1.3.0
 
 - Cross-platform auto-update: Sparkle on macOS release builds, built-in GitHub updater on Windows/Linux.
-- About page with version display, update checks, and project/support links.
+- About page with update checks, version display, and project/support links.
+- Version shown in the status bar for quick verification after updates.
 - PS1 multi-bin CUE INDEX recalculation for merged disc images (fixes boot stalls on multi-track games).
 - Release CI: version sync, signed `appcast.xml`, optional Apple codesigning.
 
-See [docs/auto-update.md](docs/auto-update.md) for maintainer setup.
+Maintainer setup: **[docs/auto-update.md](docs/auto-update.md)**.
 
 ## Features
 
