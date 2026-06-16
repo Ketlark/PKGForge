@@ -113,7 +113,11 @@ jobs:
           SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
         run: |
           chmod +x scripts/embed-sparkle.sh scripts/sign-macos-app.sh
-          wails build -platform ${{ matrix.platform }} -clean -tags sparkle -ldflags "-X main.Version=${{ steps.version.outputs.version }}"
+          SPARKLE_MOD="$(go list -f '{{.Dir}}' -m github.com/abemedia/go-sparkle)"
+          export DYLD_FRAMEWORK_PATH="$SPARKLE_MOD"
+          # Bindings are committed; skip running the Sparkle-linked binary during generation.
+          wails build -platform ${{ matrix.platform }} -clean -tags sparkle -skipbindings \
+            -ldflags "-X main.Version=${{ steps.version.outputs.version }}"
           APP=$(find build/bin -maxdepth 1 -name "*.app" | head -1)
           if [ -n "$SPARKLE_PUBLIC_ED_KEY" ] && [ -n "$APP" ]; then
             /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $SPARKLE_PUBLIC_ED_KEY" "$APP/Contents/Info.plist"
