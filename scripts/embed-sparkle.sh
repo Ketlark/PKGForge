@@ -7,6 +7,8 @@ BIN_PATH="${1:?binary path required}"
 
 if [[ "$BIN_PATH" == *.app ]]; then
   APP_BUNDLE="$BIN_PATH"
+elif [[ "$BIN_PATH" == *".app/Contents/MacOS/"* ]]; then
+  APP_BUNDLE="${BIN_PATH%%/Contents/MacOS/*}"
 else
   APP_BUNDLE="$(find "$(dirname "$BIN_PATH")" -maxdepth 1 -name '*.app' -print -quit)"
 fi
