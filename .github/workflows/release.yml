@@ -165,9 +165,11 @@ jobs:
         run: |
           APP=$(find build/bin -maxdepth 1 -name "*.app" | head -1)
           if [ -z "$APP" ]; then echo "No .app in build/bin"; ls -la build/bin; exit 1; fi
-          ditto -c -k --sequesterRsrc --keepParent "$APP" pkg-forge-macos-universal.zip
-          chmod +x scripts/verify-macos-zip.sh
+          chmod +x scripts/verify-macos-zip.sh scripts/verify-macos-sparkle-archive.sh scripts/package-macos-sparkle-archive.sh
+          ditto -c -k --rsrc --sequesterRsrc --keepParent "$APP" pkg-forge-macos-universal.zip
           bash scripts/verify-macos-zip.sh pkg-forge-macos-universal.zip
+          bash scripts/package-macos-sparkle-archive.sh "$APP" pkg-forge-macos-universal.tar.xz
+          bash scripts/verify-macos-sparkle-archive.sh pkg-forge-macos-universal.tar.xz
           echo "PACKAGED=pkg-forge-macos-universal.zip" >> "$GITHUB_ENV"
 
       - name: Notarize macOS app
@@ -188,7 +190,7 @@ jobs:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p feed
-          cp pkg-forge-macos-universal.zip feed/
+          cp pkg-forge-macos-universal.tar.xz feed/
           chmod +x scripts/generate-appcast.sh
           bash scripts/generate-appcast.sh feed
           mv feed/appcast.xml appcast.xml
@@ -216,6 +218,7 @@ jobs:
           name: ${{ matrix.name }}
           path: |
             pkg-forge-macos-universal.zip
+            pkg-forge-macos-universal.tar.xz
             appcast.xml
           if-no-files-found: error
 

@@ -34,15 +34,24 @@ Each GitHub Release (`v*`) publishes:
 | `SHA256SUMS.txt` | Integrity checks for Win/Linux built-in updater |
 | `appcast.xml` | Sparkle feed (macOS); resolved via `/releases/latest/download/appcast.xml` |
 
-### macOS zip format
+### macOS release archives
 
-The macOS zip is created with:
+| File | Purpose |
+|------|---------|
+| `pkg-forge-macos-universal.zip` | Manual download from GitHub Releases |
+| `pkg-forge-macos-universal.tar.xz` | Sparkle auto-update feed (`appcast.xml` enclosure) |
+
+The zip is created with:
 
 ```bash
-ditto -c -k --sequesterRsrc --keepParent "PKG Forge.app" pkg-forge-macos-universal.zip
+ditto -c -k --rsrc --sequesterRsrc --keepParent "PKG Forge.app" pkg-forge-macos-universal.zip
 ```
 
-`--sequesterRsrc` preserves framework symlinks and code signatures as required by [Sparkle](https://sparkle-project.org/documentation/publishing/).
+Sparkle updates use **tar.xz** instead of zip — zip extraction on macOS can drop embedded frameworks (`Sparkle.framework`) intermittently after in-app updates ([Sparkle #311](https://github.com/sparkle-project/Sparkle/issues/311)). CI verifies both archives before publish.
+
+```bash
+COPYFILE_DISABLE=1 tar -cJf pkg-forge-macos-universal.tar.xz -C build/bin "PKG Forge.app"
+```
 
 ---
 
@@ -55,7 +64,7 @@ These must all match for a given release (e.g. tag `v1.2.0` → version `1.2.0`)
 | `wails.json` → `info.productVersion` | `scripts/sync-product-version.sh` in CI |
 | `CFBundleShortVersionString` / `CFBundleVersion` | Wails from `info.productVersion` |
 | `main.Version` (About page, Win/Linux updater) | `-ldflags "-X main.Version=…"` in CI |
-| `sparkle:version` in `appcast.xml` | `generate_appcast` (reads version from `.app` inside zip) |
+| `sparkle:version` in `appcast.xml` | `generate-appcast.sh` (signs the `.tar.xz` update archive) |
 
 CI runs `scripts/sync-product-version.sh` before every platform build.
 
@@ -180,7 +189,10 @@ wails build
 | `scripts/generate-appcast.sh` | Build signed `appcast.xml` via Sparkle `sign_update` (+ self-verify) |
 | `scripts/derive_sparkle_public_key.go` | Derive `SUPublicEDKey` from exported private key (CI key-pair check) |
 | `scripts/resign-macos-adhoc.sh` | Ad-hoc re-sign `.app` after `Info.plist` / Sparkle edits |
-| `scripts/verify-macos-zip.sh` | CI gate: zip must contain `Sparkle.framework` and version ≥ 1.3.1 |
+| `scripts/verify-macos-app.sh` | Shared bundle checks (Sparkle.framework present) |
+| `scripts/verify-macos-zip.sh` | CI gate for manual-download zip |
+| `scripts/package-macos-sparkle-archive.sh` | Build Sparkle `.tar.xz` update archive |
+| `scripts/verify-macos-sparkle-archive.sh` | CI gate: tar.xz extracts to app with `Sparkle.framework` |
 
 ---
 
@@ -192,7 +204,8 @@ wails build
 | **“The update is improperly signed…”** | Installed app has empty/wrong `SUPublicEDKey` (common with local `wails build`); or `SPARKLE_PUBLIC_ED_KEY` / `SPARKLE_EDDSA_PRIVATE_KEY` mismatch in CI; or testing with a dev-signed build against ad-hoc CI releases |
 | Feed URL 404 | `appcast.xml` not attached to the latest release, or wrong URL (`releases/latest/download/`, not `releases/download/latest/`) |
 | macOS app crashes at launch (`Sparkle.framework` missing) | **v1.3.0 macOS zip is broken** (no embedded framework). Delete the app and install **v1.3.1+** manually from [Releases](https://github.com/Ketlark/PKGForge/releases). Do not use the v1.3.0 macOS asset. Later releases embed Sparkle correctly. |
-| Sparkle update ends on v1.3.0 / same crash after update | The installed bundle is the broken v1.3.0 build (check `CFBundleShortVersionString` in crash log). Remove `PKG Forge.app` from Desktop/Applications and install **v1.3.3** fresh from GitHub before retrying auto-update. |
+| Sparkle update ends on v1.3.0 / same crash after update | The installed bundle is the broken v1.3.0 build (check `CFBundleShortVersionString` in crash log). Remove `PKG Forge.app` and install **v1.3.3+** manually from GitHub before retrying auto-update. |
+| Sparkle update from v1.3.1+ still crashes (`Sparkle.framework` missing) | Known zip extraction issue during in-app updates; fixed from **v1.3.4** by shipping `.tar.xz` in the appcast. Install v1.3.4+ manually once, then auto-update should work. |
 | Update offered but install fails | App not signed/notarized; quarantined download; Gatekeeper block |
 | Win/Linux says up to date but GitHub has newer tag | `main.Version` is `dev`; or semver pre-release tag not parsed |
 | macOS dev build behaves differently from release | Dev builds lack `-tags sparkle`; use built-in updater instead |

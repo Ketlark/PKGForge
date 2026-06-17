@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Generate a signed Sparkle appcast.xml for the macOS update zip in dist/.
+# Generate a signed Sparkle appcast.xml for the macOS update archive in dist/.
+#
+# Sparkle updates use .tar.xz (more reliable than zip for embedded frameworks).
+# Manual GitHub downloads still ship .zip.
 #
 # Requires Sparkle sign_update on PATH (macOS Sparkle bin/).
 # Env:
@@ -8,8 +11,8 @@
 set -euo pipefail
 
 DIST_DIR="${1:-dist}"
-ZIP_NAME="pkg-forge-macos-universal.zip"
-ZIP_PATH="$DIST_DIR/$ZIP_NAME"
+ARCHIVE_NAME="pkg-forge-macos-universal.tar.xz"
+ARCHIVE_PATH="$DIST_DIR/$ARCHIVE_NAME"
 APPCAST="$DIST_DIR/appcast.xml"
 TAG="${RELEASE_VERSION:?RELEASE_VERSION is required}"
 VERSION="${TAG#v}"
@@ -20,8 +23,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ ! -f "$ZIP_PATH" ]]; then
-  echo "generate-appcast: missing $ZIP_PATH" >&2
+if [[ ! -f "$ARCHIVE_PATH" ]]; then
+  echo "generate-appcast: missing $ARCHIVE_PATH" >&2
   exit 1
 fi
 
@@ -44,8 +47,8 @@ if [[ -z "${SPARKLE_EDDSA_PRIVATE_KEY:-}" ]]; then
       <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
       <pubDate>$(date -R)</pubDate>
       <enclosure
-        url="${DOWNLOAD_PREFIX}${ZIP_NAME}"
-        length="$(wc -c < "$ZIP_PATH" | tr -d ' ')"
+        url="${DOWNLOAD_PREFIX}${ARCHIVE_NAME}"
+        length="$(wc -c < "$ARCHIVE_PATH" | tr -d ' ')"
         type="application/octet-stream"/>
     </item>
   </channel>
@@ -61,10 +64,10 @@ if ! command -v sign_update >/dev/null 2>&1; then
 fi
 
 printf '%s' "$SPARKLE_EDDSA_PRIVATE_KEY" > "$KEY_FILE"
-SIGNATURE="$(sign_update --ed-key-file "$KEY_FILE" -p "$ZIP_PATH" | tr -d '\n\r')"
-LENGTH="$(wc -c < "$ZIP_PATH" | tr -d ' ')"
+SIGNATURE="$(sign_update --ed-key-file "$KEY_FILE" -p "$ARCHIVE_PATH" | tr -d '\n\r')"
+LENGTH="$(wc -c < "$ARCHIVE_PATH" | tr -d ' ')"
 
-if ! sign_update --ed-key-file "$KEY_FILE" --verify "$ZIP_PATH" "$SIGNATURE"; then
+if ! sign_update --ed-key-file "$KEY_FILE" --verify "$ARCHIVE_PATH" "$SIGNATURE"; then
   echo "generate-appcast: signature self-check failed" >&2
   exit 1
 fi
@@ -84,7 +87,7 @@ cat > "$APPCAST" <<EOF
       <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
       <pubDate>$(date -R)</pubDate>
       <enclosure
-        url="${DOWNLOAD_PREFIX}${ZIP_NAME}"
+        url="${DOWNLOAD_PREFIX}${ARCHIVE_NAME}"
         sparkle:edSignature="${SIGNATURE}"
         length="${LENGTH}"
         type="application/octet-stream"/>

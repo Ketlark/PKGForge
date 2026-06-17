@@ -29,6 +29,8 @@
         <false/>
         <key>SUAllowsAutomaticUpdates</key>
         <false/>
+        <key>SUEnableInstallerLauncherService</key>
+        <true/>
         <key>SUPublicEDKey</key>
         <string>Nl64z98x17/GGzL/k7JNQ5S3B19x0ukTnAzRZcpcJfg=</string>
         {{if .Info.FileAssociations}}
