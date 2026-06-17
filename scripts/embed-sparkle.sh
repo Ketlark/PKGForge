@@ -60,6 +60,9 @@ ditto "$SRC_FW" "$DEST_DIR/Sparkle.framework"
 if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
   bash "$(dirname "$0")/sign-macos-app.sh" "$APP_BUNDLE"
 else
+  dot_clean -m "$APP_BUNDLE" 2>/dev/null || true
+  xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+  codesign -f -s - "$DEST_DIR/Sparkle.framework/Versions/B/Sparkle" 2>/dev/null || true
   codesign -f -s - "$DEST_DIR/Sparkle.framework" 2>/dev/null || true
 fi
 

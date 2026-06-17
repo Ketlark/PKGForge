@@ -206,6 +206,7 @@ wails build
 | macOS app crashes at launch (`Sparkle.framework` missing) | **v1.3.0 macOS zip is broken** (no embedded framework). Delete the app and install **v1.3.1+** manually from [Releases](https://github.com/Ketlark/PKGForge/releases). Do not use the v1.3.0 macOS asset. Later releases embed Sparkle correctly. |
 | Sparkle update ends on v1.3.0 / same crash after update | The installed bundle is the broken v1.3.0 build (check `CFBundleShortVersionString` in crash log). Remove `PKG Forge.app` and install **v1.3.3+** manually from GitHub before retrying auto-update. |
 | Sparkle update from v1.3.1+ still crashes (`Sparkle.framework` missing) | Known zip extraction issue during in-app updates; fixed from **v1.3.4** by shipping `.tar.xz` in the appcast. Install v1.3.4+ manually once, then auto-update should work. |
+| App is v1.3.4 but crashes with `different Team IDs` on macOS 26+ | Ad-hoc CI builds used hardened runtime on Sparkle; fixed in **v1.3.5** (`resign-macos-adhoc.sh`). Clear quarantine: `xattr -cr '/path/PKG Forge.app'`. |
 | Update offered but install fails | App not signed/notarized; quarantined download; Gatekeeper block |
 | Win/Linux says up to date but GitHub has newer tag | `main.Version` is `dev`; or semver pre-release tag not parsed |
 | macOS dev build behaves differently from release | Dev builds lack `-tags sparkle`; use built-in updater instead |
