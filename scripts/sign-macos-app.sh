@@ -17,12 +17,15 @@ sign() {
 
 FW="$APP/Contents/Frameworks/Sparkle.framework"
 if [[ -d "$FW" ]]; then
-  VA="$FW/Versions/A"
+  VB="$FW/Versions/B"
+  if [[ ! -d "$VB" ]]; then
+    VB="$FW/Versions/A"
+  fi
   for target in \
-    "$VA/XPCServices/Installer.xpc" \
-    "$VA/XPCServices/Downloader.xpc" \
-    "$VA/Autoupdate" \
-    "$VA/Updater.app"; do
+    "$VB/XPCServices/Installer.xpc" \
+    "$VB/XPCServices/Downloader.xpc" \
+    "$VB/Autoupdate" \
+    "$VB/Updater.app"; do
     if [[ -e "$target" ]]; then
       sign "$target"
     fi

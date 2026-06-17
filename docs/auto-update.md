@@ -180,6 +180,7 @@ wails build
 | `scripts/generate-appcast.sh` | Build signed `appcast.xml` via Sparkle `sign_update` (+ self-verify) |
 | `scripts/derive_sparkle_public_key.go` | Derive `SUPublicEDKey` from exported private key (CI key-pair check) |
 | `scripts/resign-macos-adhoc.sh` | Ad-hoc re-sign `.app` after `Info.plist` / Sparkle edits |
+| `scripts/verify-macos-zip.sh` | CI gate: zip must contain `Sparkle.framework` and version ≥ 1.3.1 |
 
 ---
 
@@ -190,7 +191,8 @@ wails build
 | Sparkle never offers updates | Missing/wrong `SPARKLE_*` secrets; unsigned appcast; `SUPublicEDKey` empty in installed app |
 | **“The update is improperly signed…”** | Installed app has empty/wrong `SUPublicEDKey` (common with local `wails build`); or `SPARKLE_PUBLIC_ED_KEY` / `SPARKLE_EDDSA_PRIVATE_KEY` mismatch in CI; or testing with a dev-signed build against ad-hoc CI releases |
 | Feed URL 404 | `appcast.xml` not attached to the latest release, or wrong URL (`releases/latest/download/`, not `releases/download/latest/`) |
-| macOS app crashes at launch (`Sparkle.framework` missing) | `embed-sparkle.sh` glob failed on spaced `.app` names (e.g. `PKG Forge.app`); fixed in v1.3.1 |
+| macOS app crashes at launch (`Sparkle.framework` missing) | **v1.3.0 macOS zip is broken** (no embedded framework). Delete the app and install **v1.3.1+** manually from [Releases](https://github.com/Ketlark/PKGForge/releases). Do not use the v1.3.0 macOS asset. Later releases embed Sparkle correctly. |
+| Sparkle update ends on v1.3.0 / same crash after update | The installed bundle is the broken v1.3.0 build (check `CFBundleShortVersionString` in crash log). Remove `PKG Forge.app` from Desktop/Applications and install **v1.3.3** fresh from GitHub before retrying auto-update. |
 | Update offered but install fails | App not signed/notarized; quarantined download; Gatekeeper block |
 | Win/Linux says up to date but GitHub has newer tag | `main.Version` is `dev`; or semver pre-release tag not parsed |
 | macOS dev build behaves differently from release | Dev builds lack `-tags sparkle`; use built-in updater instead |

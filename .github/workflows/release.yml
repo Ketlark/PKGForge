@@ -166,6 +166,8 @@ jobs:
           APP=$(find build/bin -maxdepth 1 -name "*.app" | head -1)
           if [ -z "$APP" ]; then echo "No .app in build/bin"; ls -la build/bin; exit 1; fi
           ditto -c -k --sequesterRsrc --keepParent "$APP" pkg-forge-macos-universal.zip
+          chmod +x scripts/verify-macos-zip.sh
+          bash scripts/verify-macos-zip.sh pkg-forge-macos-universal.zip
           echo "PACKAGED=pkg-forge-macos-universal.zip" >> "$GITHUB_ENV"
 
       - name: Notarize macOS app
