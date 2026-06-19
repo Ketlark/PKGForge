@@ -1,12 +1,12 @@
 module pkg-forge
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/abemedia/go-sparkle v0.2.0
 	github.com/wailsapp/wails/v2 v2.12.0
 	golang.org/x/crypto v0.33.0
-	golang.org/x/mod v0.23.0
+	golang.org/x/mod v0.37.0
 )
 
 require (
