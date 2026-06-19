@@ -14,7 +14,13 @@ Disc Image (.cue/.bin or .iso)
           │
           ▼
    ┌─────────────┐
-   │ project.go  │ Build project directory (emulator files + game data)
+   │ project.go  │ Emulator assets, lua includes
+   │ project_files.go │ VirtualFS (in-memory + streamed disk files)
+   └──────┬──────┘
+          │
+          ▼
+   ┌─────────────┐
+   │ ps1.go/ps2.go │ Platform project builders → VirtualFS
    └──────┬──────┘
           │
           ▼
@@ -24,18 +30,15 @@ Disc Image (.cue/.bin or .iso)
           │
           ▼
    ┌─────────────┐
-   │ gp4.go      │ Generate .gp4 XML manifest (file list + directories)
+   │ pipeline.go │ Inner PFS → PFSC → signed outer PFS
+   │ pfs.go      │ PFS filesystem builder
+   │ pfsc.go     │ PFSC zlib compression wrapper
    └──────┬──────┘
           │
           ▼
    ┌─────────────┐
-   │ pfs.go      │ Build inner and outer PFS images
-   │ pfsc.go     │ Wrap inner PFS as PFSC data
-   └──────┬──────┘
-          │
-          ▼
-   ┌─────────────┐
-   │ pkg.go      │ Assemble PKG body, PlayGo, RIF, digests, outer PFS
+   │ pkg.go      │ PKG header, entries, RIF, digests
+   │ playgo.go   │ PlayGo chunk metadata
    └──────┬──────┘
           │
           ▼

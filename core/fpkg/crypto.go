@@ -13,6 +13,8 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
+	"io"
 	"math/big"
 )
 
@@ -325,6 +327,48 @@ func AES128XTSEncryptSkipBlocks(data, dataKey, tweakKey []byte, sectorSize, star
 	}
 
 	return out
+}
+
+// AES128XTSEncryptSkipBlocksInPlace encrypts sectors in an on-disk image without
+// allocating a second full-size buffer.
+func AES128XTSEncryptSkipBlocksInPlace(img io.ReaderAt, imgSize int64, dataKey, tweakKey []byte, sectorSize, startSector, sectorsPerBlock int, skipBlocks map[int64]bool) error {
+	w, ok := img.(io.WriterAt)
+	if !ok {
+		return fmt.Errorf("fpkg: XTS in-place requires WriterAt")
+	}
+	dataCipher, err := aes.NewCipher(dataKey)
+	if err != nil {
+		return fmt.Errorf("fpkg: AES data key: %w", err)
+	}
+	tweakCipher, err := aes.NewCipher(tweakKey)
+	if err != nil {
+		return fmt.Errorf("fpkg: AES tweak key: %w", err)
+	}
+
+	sector := make([]byte, sectorSize)
+	totalSectors := int((imgSize + int64(sectorSize) - 1) / int64(sectorSize))
+	for sectorNum := startSector; sectorNum < totalSectors; sectorNum++ {
+		if sectorsPerBlock > 0 && skipBlocks != nil && skipBlocks[int64(sectorNum/sectorsPerBlock)] {
+			continue
+		}
+		offset := int64(sectorNum) * int64(sectorSize)
+		end := offset + int64(sectorSize)
+		if end > imgSize {
+			end = imgSize
+		}
+		n := int(end - offset)
+		if _, err := img.ReadAt(sector[:n], offset); err != nil {
+			return err
+		}
+		if n < sectorSize {
+			clear(sector[n:])
+		}
+		xtsEncryptSector(sector[:n], uint64(sectorNum), dataCipher, tweakCipher)
+		if _, err := w.WriteAt(sector[:n], offset); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // xtsEncryptSector encrypts a single sector with XEX mode.

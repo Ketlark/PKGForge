@@ -13,7 +13,9 @@ package fpkg
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -30,6 +32,7 @@ type fsNode struct {
 	isDir          bool
 	children       []*fsNode // for dirs
 	data           []byte    // for files (nil for dirs)
+	sourcePath     string    // optional on-disk source (streamed, not loaded into RAM)
 	compressedSize int64     // for PFSC-wrapped files: uncompressed size
 	ino            inode
 }
@@ -54,6 +57,13 @@ func (n *fsNode) size() int64 {
 			total += int64(direntSize(c.name))
 		}
 		return total
+	}
+	if n.sourcePath != "" {
+		info, err := os.Stat(n.sourcePath)
+		if err != nil {
+			return 0
+		}
+		return info.Size()
 	}
 	return int64(len(n.data))
 }
@@ -176,6 +186,44 @@ type blockSigInfo struct {
 
 // BuildPFSImage constructs a complete PFS image and returns it as a byte slice.
 func BuildPFSImage(props PfsProperties) ([]byte, error) {
+	return buildPFSImage(props, nil)
+}
+
+// BuildPFSToFile writes an unsigned, unencrypted PFS image directly to disk.
+// This avoids holding the full image in memory — used for large PS2 disc payloads.
+func BuildPFSToFile(props PfsProperties, path string) (int64, error) {
+	if props.Encrypt || props.Sign {
+		return 0, fmt.Errorf("pfs: BuildPFSToFile only supports unsigned inner images")
+	}
+	return buildPFSToFile(props, path)
+}
+
+// BuildSignedEncryptedPFSToFile writes a signed, XTS-encrypted outer PFS image
+// directly to disk without holding the full image in memory.
+func BuildSignedEncryptedPFSToFile(props PfsProperties, path string) (int64, error) {
+	if !props.Encrypt || !props.Sign {
+		return 0, fmt.Errorf("pfs: BuildSignedEncryptedPFSToFile requires signed encrypted images")
+	}
+	return buildPFSToFile(props, path)
+}
+
+func buildPFSToFile(props PfsProperties, path string) (int64, error) {
+	f, err := os.Create(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	if _, err := buildPFSImage(props, f); err != nil {
+		return 0, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
+func buildPFSImage(props PfsProperties, destFile *os.File) ([]byte, error) {
 	if props.BlockSize == 0 {
 		props.BlockSize = 0x10000
 	}
@@ -295,7 +343,7 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 
 	// Add file inodes
 	for _, file := range allFiles {
-		blocks := uint32(ceilDiv(int64(len(file.data)), int64(props.BlockSize)))
+		blocks := uint32(ceilDiv(file.size(), int64(props.BlockSize)))
 		if blocks == 0 {
 			blocks = 1
 		}
@@ -303,7 +351,7 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 		if file.compressedSize > 0 {
 			flags |= InodeFlagCompressed
 		}
-		ino := makeInode(InodeModeFile|InodeModeRXOnly, blocks, int64(len(file.data)), flags, 1)
+		ino := makeInode(InodeModeFile|InodeModeRXOnly, blocks, file.size(), flags, 1)
 		if props.Sign {
 			ino.setFlags(ino.getFlags() & ^uint32(InodeFlagReadonly))
 		}
@@ -488,8 +536,17 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 
 	// Allocate image buffer
 	totalSize := hdr.Ndblock * int64(props.BlockSize)
-	buf := make([]byte, totalSize)
-	w := newBytesWriteSeeker(buf)
+	var buf []byte
+	var w io.WriteSeeker
+	if destFile != nil {
+		if err := destFile.Truncate(totalSize); err != nil {
+			return nil, fmt.Errorf("pfs: truncate output: %w", err)
+		}
+		w = destFile
+	} else {
+		buf = make([]byte, totalSize)
+		w = newBytesWriteSeeker(buf)
+	}
 
 	// Write header
 	hdr.writeTo(w)
@@ -523,7 +580,9 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 	for _, file := range allFiles {
 		blk := int64(file.ino.startBlock()) * int64(props.BlockSize)
 		seekTo(w, blk)
-		w.Write(file.data)
+		if err := writeFileNodeContent(w, file); err != nil {
+			return nil, fmt.Errorf("pfs: write %s: %w", file.fullPath(), err)
+		}
 	}
 
 	// Write uroot directory dirents
@@ -561,19 +620,8 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 		// The PS4 kernel uses raw EKPFS for signing key derivation regardless
 		// of pfs_flags. Confirmed by klog analysis.
 		signKey := PfsGenSignKey(props.EKPFS, hdr.Seed)
-		signBlock := func(sigInfo blockSigInfo) {
-			start := sigInfo.block * int64(props.BlockSize)
-			end := start + sigInfo.size
-			sig := HmacSha256(signKey, buf[start:end])
-			copy(buf[sigInfo.sigOff:], sig)
-			binary.LittleEndian.PutUint32(buf[sigInfo.sigOff+32:], uint32(sigInfo.block))
-		}
-
-		for _, sigInfo := range dataSigs {
-			signBlock(sigInfo)
-		}
-		for i := len(finalSigs) - 1; i >= 0; i-- {
-			signBlock(finalSigs[i])
+		if err := signPFSImage(destFile, buf, props.BlockSize, signKey, dataSigs, finalSigs); err != nil {
+			return nil, err
 		}
 	}
 
@@ -591,11 +639,58 @@ func BuildPFSImage(props PfsProperties) ([]byte, error) {
 		if emptyBlock >= 0 {
 			skipBlocks = map[int64]bool{emptyBlock: true}
 		}
-		encrypted := AES128XTSEncryptSkipBlocks(buf, dataKey, tweakKey, 0x1000, startSector, sectorsPerBlock, skipBlocks)
-		buf = encrypted
+		if destFile != nil {
+			if err := AES128XTSEncryptSkipBlocksInPlace(destFile, totalSize, dataKey, tweakKey, 0x1000, startSector, sectorsPerBlock, skipBlocks); err != nil {
+				return nil, err
+			}
+		} else {
+			encrypted := AES128XTSEncryptSkipBlocks(buf, dataKey, tweakKey, 0x1000, startSector, sectorsPerBlock, skipBlocks)
+			buf = encrypted
+		}
 	}
 
 	return buf, nil
+}
+
+func signPFSImage(destFile *os.File, buf []byte, blockSize uint32, signKey []byte, dataSigs, finalSigs []blockSigInfo) error {
+	if destFile == nil && buf == nil {
+		return fmt.Errorf("pfs: signed image requires memory buffer or output file")
+	}
+	signBlock := func(sigInfo blockSigInfo) error {
+		start := sigInfo.block * int64(blockSize)
+		var blockData []byte
+		if buf != nil {
+			end := start + sigInfo.size
+			blockData = buf[start:end]
+		} else {
+			blockData = make([]byte, sigInfo.size)
+			if _, err := destFile.ReadAt(blockData, start); err != nil {
+				return err
+			}
+		}
+		sig := HmacSha256(signKey, blockData)
+		sigBuf := make([]byte, 36)
+		copy(sigBuf, sig)
+		binary.LittleEndian.PutUint32(sigBuf[32:], uint32(sigInfo.block))
+		if buf != nil {
+			copy(buf[sigInfo.sigOff:], sigBuf)
+			return nil
+		}
+		_, err := destFile.WriteAt(sigBuf, sigInfo.sigOff)
+		return err
+	}
+
+	for _, sigInfo := range dataSigs {
+		if err := signBlock(sigInfo); err != nil {
+			return err
+		}
+	}
+	for i := len(finalSigs) - 1; i >= 0; i-- {
+		if err := signBlock(finalSigs[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -683,6 +778,17 @@ func (w *bytesWriteSeeker) Seek(offset int64, whence int) (int64, error) {
 	return int64(w.pos), nil
 }
 
+func (w *bytesWriteSeeker) WriteAt(p []byte, off int64) (int, error) {
+	if off < 0 || int(off) > len(w.data) {
+		return 0, fmt.Errorf("pfs: writeat out of range")
+	}
+	end := int(off) + len(p)
+	if end > len(w.data) {
+		return 0, fmt.Errorf("pfs: writeat out of range")
+	}
+	return copy(w.data[off:end], p), nil
+}
+
 func ceilDiv(a, b int64) int64 {
 	return (a + b - 1) / b
 }
@@ -725,15 +831,21 @@ func (n *fsNode) AddChild(child *fsNode) {
 	n.children = append(n.children, child)
 }
 
-// BuildFSTree creates a filesystem tree from a list of file paths and their data.
-// files is a map of relative path -> file content.
-func BuildFSTree(files map[string][]byte) *fsNode {
+// BuildFSTree creates a filesystem tree from in-memory files and optional on-disk sources.
+// fileSources entries are streamed into the PFS instead of being loaded into RAM.
+func BuildFSTree(files map[string][]byte, fileSources map[string]string) *fsNode {
 	root := &fsNode{isDir: true, name: ""}
 
-	// Sort paths for deterministic ordering
 	var paths []string
+	seen := make(map[string]bool, len(files)+len(fileSources))
 	for p := range files {
 		paths = append(paths, p)
+		seen[p] = true
+	}
+	for p := range fileSources {
+		if !seen[p] {
+			paths = append(paths, p)
+		}
 	}
 	sort.Strings(paths)
 
@@ -741,7 +853,6 @@ func BuildFSTree(files map[string][]byte) *fsNode {
 		parts := strings.Split(path, "/")
 		current := root
 
-		// Navigate/create intermediate directories
 		for i := 0; i < len(parts)-1; i++ {
 			dirName := parts[i]
 			found := false
@@ -759,11 +870,14 @@ func BuildFSTree(files map[string][]byte) *fsNode {
 			}
 		}
 
-		// Add the file
 		file := &fsNode{
 			name:   parts[len(parts)-1],
-			data:   files[path],
 			parent: current,
+		}
+		if src, ok := fileSources[path]; ok {
+			file.sourcePath = src
+		} else {
+			file.data = files[path]
 		}
 		current.children = append(current.children, file)
 	}
@@ -771,13 +885,27 @@ func BuildFSTree(files map[string][]byte) *fsNode {
 	return root
 }
 
+func writeFileNodeContent(w io.Writer, file *fsNode) error {
+	if file.sourcePath != "" {
+		f, err := os.Open(file.sourcePath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(w, f)
+		return err
+	}
+	_, err := w.Write(file.data)
+	return err
+}
+
 // ---------------------------------------------------------------------------
 // BuildPFS creates a complete PFS image from a file map (inner PFS).
 // This is a convenience function that handles the boilerplate.
 // ---------------------------------------------------------------------------
 
-func BuildPFS(files map[string][]byte, blockSize uint32, minBlocks uint32) ([]byte, error) {
-	root := BuildFSTree(files)
+func BuildPFS(files map[string][]byte, fileSources map[string]string, blockSize uint32, minBlocks uint32) ([]byte, error) {
+	root := BuildFSTree(files, fileSources)
 	props := PfsProperties{
 		Root:      root,
 		BlockSize: blockSize,
@@ -787,6 +915,19 @@ func BuildPFS(files map[string][]byte, blockSize uint32, minBlocks uint32) ([]by
 		FileTime:  time.Now().Unix(),
 	}
 	return BuildPFSImage(props)
+}
+
+func BuildPFSToFileFromMaps(files map[string][]byte, fileSources map[string]string, blockSize uint32, minBlocks uint32, path string) (int64, error) {
+	root := BuildFSTree(files, fileSources)
+	props := PfsProperties{
+		Root:      root,
+		BlockSize: blockSize,
+		MinBlocks: minBlocks,
+		Encrypt:   false,
+		Sign:      false,
+		FileTime:  time.Now().Unix(),
+	}
+	return BuildPFSToFile(props, path)
 }
 
 // ---------------------------------------------------------------------------

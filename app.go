@@ -460,10 +460,12 @@ type PS2FPKGRequest struct {
 
 // PS2DiscDetectResult holds auto-detection results for a PS2 disc.
 type PS2DiscDetectResult struct {
-	GameID    string            `json:"gameID"`
-	Title     string            `json:"title"`
-	Region    string            `json:"region"`
-	SystemCNF map[string]string `json:"systemCNF"`
+	GameID     string            `json:"gameID"`
+	Title      string            `json:"title"`
+	Region     string            `json:"region"`
+	SystemCNF  map[string]string `json:"systemCNF"`
+	CoverPath  string            `json:"coverPath"`
+	Profile    *fpkg.PS2ProfileHint `json:"profile,omitempty"`
 }
 
 // DetectPS2Disc parses a PS2 .iso file and returns disc metadata.
@@ -490,11 +492,20 @@ func (a *App) DetectPS2Disc(isoPath string) (*PS2DiscDetectResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	coverPath := ""
+	if discInfo.GameID != "" {
+		if resolvedCover, err := fpkg.ResolvePS2Cover(isoPath, discInfo.GameID); err == nil {
+			coverPath = resolvedCover
+		}
+	}
+	profile, _ := fpkg.PS2ProfileForGame(discInfo.GameID)
 	return &PS2DiscDetectResult{
 		GameID:    discInfo.GameID,
 		Title:     discInfo.Title,
 		Region:    discInfo.Region,
 		SystemCNF: discInfo.SystemCNF,
+		CoverPath: coverPath,
+		Profile:   profile,
 	}, nil
 }
 

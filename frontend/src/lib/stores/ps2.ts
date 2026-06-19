@@ -32,6 +32,13 @@ export const ps2DetectedGameID = writable('');
 export const ps2DetectedTitle = writable('');
 export const ps2DetectedRegion = writable('');
 export const ps2DetectedSystemCNF = writable<Record<string, string>>({});
+export const ps2DetectedCoverPath = writable('');
+export const ps2DetectedProfile = writable<{
+  emulator?: string;
+  emuCore?: string;
+  displayMode?: string;
+  uprender?: string;
+} | null>(null);
 
 // Progress
 export const ps2Running = writable(false);
@@ -106,6 +113,22 @@ export function removeISO(index: number) {
   ps2ISOPaths.set([...isos]);
 }
 
+function applyDetectedProfile(profile?: {
+  emulator?: string;
+  emuCore?: string;
+  displayMode?: string;
+  uprender?: string;
+} | null) {
+  if (!profile) {
+    ps2DetectedProfile.set(null);
+    return;
+  }
+  ps2DetectedProfile.set(profile);
+  if (profile.emulator) ps2Emulator.set(profile.emulator);
+  if (profile.displayMode) ps2DisplayMode.set(profile.displayMode);
+  if (profile.uprender) ps2Uprender.set(profile.uprender);
+}
+
 export async function detectPS2Disc(isoPath: string) {
   try {
     ps2Error.set('');
@@ -115,9 +138,12 @@ export async function detectPS2Disc(isoPath: string) {
       ps2DetectedTitle.set(result.title);
       ps2DetectedRegion.set(result.region);
       ps2DetectedSystemCNF.set(result.systemCNF || {});
+      ps2DetectedCoverPath.set(result.coverPath || '');
 
       if (result.gameID) ps2TitleID.set(result.gameID);
       if (result.title) ps2Title.set(result.title);
+      ps2Icon0.set(result.coverPath || '');
+      applyDetectedProfile(result.profile || null);
     }
   } catch (e: any) {
     ps2Error.set(e?.toString() || 'Detection failed');

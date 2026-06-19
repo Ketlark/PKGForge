@@ -890,8 +890,8 @@ func CreatePS1FPKG(opts PS1FPKGOptions) error {
 
 	// Build the fPKG using the generic PKG builder
 	pkgOpts := PKGOptions{
-		Files:     files,
-		Title:     title,
+		Project: VirtualFSFromMaps(files, nil),
+		Title:   title,
 		TitleID:   normalizeTitleID(titleID),
 		ContentID: contentID,
 		OnProgress: func(percent float64, phase string) {
@@ -901,17 +901,8 @@ func CreatePS1FPKG(opts PS1FPKGOptions) error {
 		},
 	}
 
-	pkgData, err := BuildFPKG(pkgOpts)
-	if err != nil {
+	if err := BuildFPKGToFile(opts.OutputPath, pkgOpts); err != nil {
 		return fmt.Errorf("build fpkg: %w", err)
-	}
-
-	// Write output file
-	if opts.OnProgress != nil {
-		opts.OnProgress(97, "Writing package")
-	}
-	if err := os.WriteFile(opts.OutputPath, pkgData, 0644); err != nil {
-		return fmt.Errorf("write pkg: %w", err)
 	}
 	if opts.OnProgress != nil {
 		opts.OnProgress(100, "Complete")

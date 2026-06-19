@@ -59,11 +59,25 @@ var requiredBundledAssetPaths = []string{
 	"emus/Jak v2/sce_module/libSceFios2.prx",
 	"emus/Jak v2/ps2-emu-compiler.self",
 	"emus/Jak v2/PS20220WD20050620.crack",
+	"emus/Jak v2/sce_discmap.plt",
+	"emus/Jak v2/config-emu-ps4.txt",
+	"emus/Jak v2/formatted.card",
 	"emus/Rogue v1/eboot.bin",
 	"emus/Rogue v1/sce_module/libc.prx",
 	"emus/Rogue v1/sce_module/libSceFios2.prx",
 	"emus/Rogue v1/ps2-emu-compiler.self",
 	"emus/Rogue v1/PS20220WD20050620.crack",
+	"emus/Rogue v1/sce_discmap.plt",
+	"emus/Rogue v1/config-emu-ps4.txt",
+	"emus/Rogue v1/formatted.card",
+	"emus/Siren v2/eboot.bin",
+	"emus/Siren v2/sce_module/libc.prx",
+	"emus/Siren v2/sce_module/libSceFios2.prx",
+	"emus/Siren v2/ps2-emu-compiler.self",
+	"emus/Siren v2/PS20220WD20050620.crack",
+	"emus/Siren v2/sce_discmap.plt",
+	"emus/Siren v2/config-emu-ps4.txt",
+	"emus/Siren v2/formatted.card",
 }
 
 // AssetsCacheDir returns the local cache directory for emulator assets.
@@ -372,6 +386,7 @@ var EmulatorArchiveName = map[string]string{
 	"ps1_netemu": "ps1hd",
 	"jakv2":      "Jak v2",
 	"rogue":      "Rogue v1",
+	"siren":      "Siren v2",
 }
 
 // ResolveArchiveEmuName returns the archive folder name for an internal emulator id.

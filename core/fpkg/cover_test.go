@@ -114,6 +114,93 @@ func TestResolvePS1BackgroundUsesLocalBackgroundAndCachesPNG(t *testing.T) {
 	}
 }
 
+func TestResolvePS2CoverUsesLocalCoverAndCachesPNG(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := t.TempDir()
+	isoPath := filepath.Join(dir, "Gran Turismo 4.iso")
+	coverPath := filepath.Join(dir, "Gran Turismo 4_cover.png")
+
+	if err := os.WriteFile(isoPath, []byte("iso"), 0644); err != nil {
+		t.Fatalf("write iso: %v", err)
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, 4, 2))
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 4; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(40 * x), G: uint8(80 * y), B: 120, A: 255})
+		}
+	}
+	f, err := os.Create(coverPath)
+	if err != nil {
+		t.Fatalf("create cover: %v", err)
+	}
+	if err := png.Encode(f, img); err != nil {
+		f.Close()
+		t.Fatalf("encode cover: %v", err)
+	}
+	f.Close()
+
+	got, err := ResolvePS2Cover(isoPath, "SCES-51719")
+	if err != nil {
+		t.Fatalf("resolve cover: %v", err)
+	}
+	if filepath.Ext(got) != ".png" {
+		t.Fatalf("cached cover extension = %q, want .png", filepath.Ext(got))
+	}
+}
+
+func TestResolvePS2BackgroundUsesLocalBackgroundAndCachesPNG(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := t.TempDir()
+	isoPath := filepath.Join(dir, "Gran Turismo 4.iso")
+	backgroundPath := filepath.Join(dir, "Gran Turismo 4_background.png")
+
+	if err := os.WriteFile(isoPath, []byte("iso"), 0644); err != nil {
+		t.Fatalf("write iso: %v", err)
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, 8, 3))
+	for y := 0; y < 3; y++ {
+		for x := 0; x < 8; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(25 * x), G: uint8(70 * y), B: 160, A: 255})
+		}
+	}
+	f, err := os.Create(backgroundPath)
+	if err != nil {
+		t.Fatalf("create background: %v", err)
+	}
+	if err := png.Encode(f, img); err != nil {
+		f.Close()
+		t.Fatalf("encode background: %v", err)
+	}
+	f.Close()
+
+	got, err := ResolvePS2Background(isoPath, "SCES-51719")
+	if err != nil {
+		t.Fatalf("resolve background: %v", err)
+	}
+	cached, err := os.Open(got)
+	if err != nil {
+		t.Fatalf("open cached background: %v", err)
+	}
+	defer cached.Close()
+
+	cfg, format, err := image.DecodeConfig(cached)
+	if err != nil {
+		t.Fatalf("decode cached background: %v", err)
+	}
+	if format != "png" {
+		t.Fatalf("cached background format = %q, want png", format)
+	}
+	if cfg.Width != 1920 || cfg.Height != 1080 {
+		t.Fatalf("cached background size = %dx%d, want 1920x1080", cfg.Width, cfg.Height)
+	}
+}
+
 func TestPS1BackgroundFromImagePathUsesLaunchDimensions(t *testing.T) {
 	dir := t.TempDir()
 	coverPath := filepath.Join(dir, "cover.png")

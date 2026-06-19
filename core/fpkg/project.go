@@ -65,6 +65,10 @@ func DefaultPS2EmulatorSets() map[PS2EmulatorType]*EmulatorSet {
 			Name:  "Rogue v1",
 			Files: jakFiles, // same file layout, different binary content
 		},
+		EmuSiren: {
+			Name:  "Siren v2",
+			Files: jakFiles,
+		},
 	}
 }
 
@@ -92,6 +96,37 @@ func LoadEmulatorFiles(emuDir string, emuSet *EmulatorSet) (map[string][]byte, e
 	}
 
 	return files, nil
+}
+
+// ps2CoreOverlayPaths are replaced from EmuCore when using a hybrid launcher/core layout.
+var ps2CoreOverlayPaths = []string{
+	"ps2-emu-compiler.self",
+	"PS20220WD20050620.crack",
+	"sce_discmap.plt",
+}
+
+func overlayPS2EmulatorCore(files map[string][]byte, emuDir string, emuSets map[PS2EmulatorType]*EmulatorSet, coreEmu PS2EmulatorType) error {
+	coreSet, ok := emuSets[coreEmu]
+	if !ok {
+		return fmt.Errorf("unknown emulator core %q", coreEmu)
+	}
+	for _, virtualPath := range ps2CoreOverlayPaths {
+		localName := coreSet.Files[virtualPath]
+		if localName == "" {
+			continue
+		}
+		localPath := filepath.Join(emuDir, coreSet.Name, localName)
+		data, err := os.ReadFile(localPath)
+		if err != nil {
+			localPath = filepath.Join(emuDir, localName)
+			data, err = os.ReadFile(localPath)
+			if err != nil {
+				return fmt.Errorf("missing core file %s: %w", localName, err)
+			}
+		}
+		files[virtualPath] = data
+	}
+	return nil
 }
 
 // LoadEmulatorDirectoryFiles loads every regular file from an emulator folder.
@@ -305,24 +340,40 @@ end
 }
 
 // GetLuaIncludeData returns the lua_include file contents for PS2 fPKGs.
-// Attempts to load from the emulator files directory first, falls back to embedded content.
-func GetLuaIncludeData(emuDir string) map[string][]byte {
+// It prefers the full lua_include directory from the assets cache, then falls
+// back to embedded stubs for any files that are still missing.
+func GetLuaIncludeData(cacheDir string) map[string][]byte {
 	result := make(map[string][]byte)
-
-	for virtualPath, content := range LuaIncludeFiles {
-		// Try to load from disk first
-		if emuDir != "" {
-			localPath := filepath.Join(emuDir, virtualPath)
-			data, err := os.ReadFile(localPath)
-			if err == nil {
-				result[virtualPath] = data
-				continue
+	if cacheDir != "" {
+		luaRoot := filepath.Join(cacheDir, "lua_include")
+		_ = filepath.WalkDir(luaRoot, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return nil
 			}
-		}
-		// Fall back to embedded content
-		result[virtualPath] = []byte(content)
+			if entry.Type()&fs.ModeType != 0 || strings.HasPrefix(entry.Name(), ".") {
+				return nil
+			}
+			rel, err := filepath.Rel(luaRoot, path)
+			if err != nil {
+				return nil
+			}
+			rel = filepath.ToSlash(rel)
+			if strings.Contains(rel, "..") {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			result["lua_include/"+rel] = data
+			return nil
+		})
 	}
-
+	for virtualPath, content := range LuaIncludeFiles {
+		if _, exists := result[virtualPath]; !exists {
+			result[virtualPath] = []byte(content)
+		}
+	}
 	return result
 }
 

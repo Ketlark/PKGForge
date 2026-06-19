@@ -111,11 +111,11 @@ func isEssential(rel string) bool {
 	switch emu {
 	case "ps1hd":
 		return true
-	case "Jak v2", "Rogue v1":
-		return strings.Contains(rel, "eboot.bin") ||
-			strings.Contains(rel, "sce_module/") ||
-			strings.Contains(rel, "ps2-emu-compiler") ||
-			strings.Contains(rel, ".crack")
+	case "Jak v2", "Rogue v1", "Siren v2":
+		if strings.Contains(rel, "/docs/") {
+			return false
+		}
+		return true
 	}
 
 	return false

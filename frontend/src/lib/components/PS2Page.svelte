@@ -21,6 +21,8 @@
     ps2DiscCount,
     ps2DetectedGameID,
     ps2DetectedRegion,
+    ps2DetectedCoverPath,
+    ps2DetectedProfile,
     browseISOs,
     addExtraDisc,
     removeISO,
@@ -86,6 +88,14 @@
 
       <div class="stats-row">
         <span class="stat">{$ps2DiscCount} {$ps2DiscCount > 1 ? 'discs' : 'disc'}</span>
+        {#if $ps2DetectedCoverPath}
+          <span class="stat cover">{$t('ps2.coverFound')}</span>
+        {/if}
+        {#if $ps2DetectedProfile?.emulator}
+          <span class="stat profile">
+            {$t('ps2.profileAuto')}: {$ps2DetectedProfile.emulator}
+          </span>
+        {/if}
       </div>
     {/if}
   </div>
@@ -121,9 +131,9 @@
       <div class="form-grid">
         <label class="form-label" for="ps2-emu">{$t('ps2.emulatorType')}</label>
         <select id="ps2-emu" class="form-select" bind:value={$ps2Emulator} disabled={$ps2Running}>
-          <option value="jakv2">Jak v2 (recommended)</option>
+          <option value="jakv2">Jak v2</option>
+          <option value="siren">Forbidden Siren v2 (GT4)</option>
           <option value="rogue">Rogue Galaxy</option>
-          <option value="codeveronica">Code: Veronica</option>
         </select>
 
         <label class="form-label" for="ps2-uprender">{$t('ps2.uprender')}</label>
@@ -313,6 +323,20 @@
   .stat {
     font-size: 12px;
     color: var(--text-secondary);
+  }
+
+  .stat.cover {
+    color: #16a34a;
+    background: rgba(22, 163, 74, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .stat.profile {
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
   }
 
   .form-grid {

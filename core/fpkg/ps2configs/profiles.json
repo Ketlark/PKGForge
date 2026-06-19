@@ -1,0 +1,21 @@
+{
+  "SCES-51719": {
+    "emulator": "siren",
+    "retailLauncher": true,
+    "displayMode": "16:9",
+    "skipUniversalCLI": true
+  },
+  "SLUS-21004": {
+    "emulator": "jakv2",
+    "uprender": "off",
+    "displayMode": "16:9",
+    "skipUniversalCLI": true
+  },
+  "SCUS-97328": {
+    "emulator": "jakv2",
+    "uprender": "off",
+    "cli": "SLUS-21004_cli.conf",
+    "displayMode": "16:9",
+    "skipUniversalCLI": true
+  }
+}

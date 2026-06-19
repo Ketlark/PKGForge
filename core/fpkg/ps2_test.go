@@ -54,4 +54,19 @@ func TestLoadPS2DiscImageReadsCueReferencedBin(t *testing.T) {
 	if !bytes.Equal(data, binData) {
 		t.Fatal("loaded image data should be the referenced BIN, not the CUE text")
 	}
+
+	staged, err := stagePS2DiscImage(cuePath, 1, filepath.Join(dir, "stage"))
+	if err != nil {
+		t.Fatalf("stage cue image: %v", err)
+	}
+	stagedData, err := os.ReadFile(staged)
+	if err != nil {
+		t.Fatalf("read staged image: %v", err)
+	}
+	if len(stagedData) != len(data)+16384 {
+		t.Fatalf("staged image size = %d, want %d", len(stagedData), len(data)+16384)
+	}
+	if !bytes.Equal(stagedData[16384:], data) {
+		t.Fatal("staged image should prepend a 16 KiB LIMG header")
+	}
 }

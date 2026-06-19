@@ -250,7 +250,7 @@ func TestBuildInnerPFS(t *testing.T) {
 		"test_file.bin":     []byte("Hello PFS!"),
 	}
 
-	innerPFS, err := BuildPFS(files, 0x10000, 0x55)
+	innerPFS, err := BuildPFS(files, nil, 0x10000, 0x55)
 	if err != nil {
 		t.Fatalf("BuildPFS failed: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestGP4Generation(t *testing.T) {
 		"test.bin":          []byte("GP4 test"),
 	}
 
-	root := BuildFSTree(files)
+	root := BuildFSTree(files, nil)
 	t.Logf("FS tree root children: %d", len(root.children))
 	for _, c := range root.children {
 		t.Logf("  %s (dir=%v, size=%d)", c.name, c.isDir, c.size())

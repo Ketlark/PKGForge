@@ -39,6 +39,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,6 +58,9 @@ const (
 
 	// EmuRogue is the Rogue Galaxy emulator (good for VU accuracy).
 	EmuRogue PS2EmulatorType = "rogue"
+
+	// EmuSiren is the Forbidden Siren PS2 Classics emulator.
+	EmuSiren PS2EmulatorType = "siren"
 )
 
 // PS2FPKGOptions contains all parameters for creating a PS2 fPKG.
@@ -80,8 +84,11 @@ type PS2FPKGOptions struct {
 	// Pic1 is the path to a 1920x1080 PNG background.
 	Pic1 string
 
-	// Emulator selects the PS2 emulator variant.
+	// Emulator selects the PS2 emulator launcher (eboot, modules).
 	Emulator PS2EmulatorType
+
+	// EmuCore optionally overlays PS2 core files (compiler, BIOS, discmap) from another emu set.
+	EmuCore PS2EmulatorType
 
 	// ConfigTXT is an optional emulator config (config-emu-ps4.txt content).
 	ConfigTXT string
@@ -180,33 +187,13 @@ func PS2ContentID(gameID string) string {
 // ---------------------------------------------------------------------------
 
 // GeneratePS2EmuConfig generates the config-emu-ps4.txt content for a PS2 fPKG.
+// Deprecated: use PS2EmuConfig with an explicit title ID.
 func GeneratePS2EmuConfig(opts PS2FPKGOptions) string {
-	var lines []string
-
-	// Basic config
-	lines = append(lines, fmt.Sprintf("--max-disc-num=%d", len(opts.ISOPaths)))
-
-	// Uprender
-	switch strings.ToLower(opts.Uprender) {
-	case "2x2":
-		lines = append(lines, "--uprender=2x2")
-	case "4x":
-		lines = append(lines, "--uprender=4x")
-	default:
-		// no uprender
+	titleID := opts.TitleID
+	if titleID == "" {
+		titleID = "SLUS-00000"
 	}
-
-	// Display mode
-	switch strings.ToLower(opts.DisplayMode) {
-	case "4:3":
-		lines = append(lines, "--display-mode=4:3")
-	case "16:9":
-		lines = append(lines, "--display-mode=16:9")
-	default:
-		// auto
-	}
-
-	return strings.Join(lines, "\n") + "\n"
+	return PS2EmuConfig(opts, titleID, len(opts.ISOPaths))
 }
 
 // ---------------------------------------------------------------------------
@@ -226,10 +213,10 @@ func GenerateDiscSwapConfig(numDiscs int) string {
 // PS2 project builder
 // ---------------------------------------------------------------------------
 
-// BuildPS2Project creates the file map for a PS2 fPKG.
-func BuildPS2Project(opts PS2FPKGOptions) (map[string][]byte, *DiscInfo, error) {
+// BuildPS2Project creates the virtual file tree for a PS2 fPKG.
+func BuildPS2Project(opts PS2FPKGOptions) (VirtualFS, *DiscInfo, error) {
 	if len(opts.ISOPaths) == 0 {
-		return nil, nil, fmt.Errorf("no ISO files provided")
+		return VirtualFS{}, nil, fmt.Errorf("no ISO files provided")
 	}
 
 	// 1. Parse the main disc
@@ -250,15 +237,15 @@ func BuildPS2Project(opts PS2FPKGOptions) (map[string][]byte, *DiscInfo, error) 
 	case ".bin":
 		cuePath, cueErr := companionCuePath(mainISO)
 		if cueErr != nil {
-			return nil, nil, cueErr
+			return VirtualFS{}, nil, cueErr
 		}
 		discInfo, err = ParsePS2DiscFromCUE(cuePath)
 	default:
-		return nil, nil, fmt.Errorf("unsupported file extension: %s (expected .iso, .cue, or .bin)", ext)
+		return VirtualFS{}, nil, fmt.Errorf("unsupported file extension: %s (expected .iso, .cue, or .bin)", ext)
 	}
 
 	if err != nil {
-		return nil, nil, fmt.Errorf("parse ps2 disc: %w", err)
+		return VirtualFS{}, nil, fmt.Errorf("parse ps2 disc: %w", err)
 	}
 
 	// 2. Resolve title and ID
@@ -279,48 +266,61 @@ func BuildPS2Project(opts PS2FPKGOptions) (map[string][]byte, *DiscInfo, error) 
 	}
 
 	contentID := PS2ContentID(titleID)
+	opts = applyPS2GameDefaults(opts, ps2PatchID(titleID))
 
-	// 3. Build file map
-	files := make(map[string][]byte)
+	// 3. Build the virtual file tree
+	project := NewVirtualFS()
 
 	// param.sfo
 	sfo := NewPS2ParamSfo(title, titleID, contentID)
-	files["sce_sys/param.sfo"] = sfo.Serialize()
+	project.PutData("sce_sys/param.sfo", sfo.Serialize())
 
 	// Icon and background
-	if opts.Icon0 != "" {
-		data, err := os.ReadFile(opts.Icon0)
-		if err == nil {
-			files["sce_sys/icon0.png"] = data
+	iconPath := opts.Icon0
+	if iconPath == "" {
+		if coverPath, err := ResolvePS2Cover(mainISO, titleID); err == nil {
+			iconPath = coverPath
+		}
+	}
+	if iconPath != "" {
+		if data, err := os.ReadFile(iconPath); err == nil {
+			project.PutData("sce_sys/icon0.png", data)
 		}
 	}
 	if opts.Pic1 != "" {
-		data, err := os.ReadFile(opts.Pic1)
-		if err == nil {
-			files["sce_sys/pic1.png"] = data
+		if data, err := os.ReadFile(opts.Pic1); err == nil {
+			project.PutData("sce_sys/pic1.png", data)
+		}
+	} else if backgroundPath, err := ResolvePS2Background(mainISO, titleID); err == nil {
+		if data, err := os.ReadFile(backgroundPath); err == nil {
+			project.PutData("sce_sys/pic1.png", data)
+		}
+	}
+	if len(project.Mem["sce_sys/pic1.png"]) == 0 && iconPath != "" {
+		if data, err := ps1BackgroundFromImagePath(iconPath, titleID); err == nil {
+			project.PutData("sce_sys/pic1.png", data)
 		}
 	}
 
-	// Memory card
-	if opts.MemoryCardPath != "" {
-		data, err := os.ReadFile(opts.MemoryCardPath)
-		if err == nil {
-			files["formatted.card"] = data
-		}
-	} else {
-		files["formatted.card"] = GenerateBlankMemoryCard()
-	}
-
-	// Emulator files (eboot.bin, libc.prx, ps2-emu-compiler.self, .crack)
+	// Emulator files (eboot.bin, libc.prx, ps2-emu-compiler.self, .crack, sce_discmap.plt, …)
 	emuSets := DefaultPS2EmulatorSets()
-	emuSet, ok := emuSets[opts.Emulator]
+	launchEmu := opts.Emulator
+	if launchEmu == "" {
+		launchEmu = EmuJakV2
+	}
+	coreEmu := opts.EmuCore
+	if coreEmu == "" {
+		coreEmu = launchEmu
+	}
+	emuSet, ok := emuSets[launchEmu]
 	if !ok {
 		emuSet = emuSets[EmuJakV2]
+		launchEmu = EmuJakV2
 	}
 
 	emuDir, loadErr := ResolveEmulatorsDir(opts.EmulatorFilesDir, nil)
 	if loadErr != nil {
-		return nil, nil, fmt.Errorf("resolve emulator files: %w", loadErr)
+		return VirtualFS{}, nil, fmt.Errorf("resolve emulator files: %w", loadErr)
 	}
 
 	if opts.OnProgress != nil {
@@ -328,71 +328,122 @@ func BuildPS2Project(opts PS2FPKGOptions) (map[string][]byte, *DiscInfo, error) 
 	}
 	emuFiles, loadErr := LoadEmulatorFiles(emuDir, emuSet)
 	if loadErr != nil {
-		return nil, nil, fmt.Errorf("load ps2 emulator files: %w", loadErr)
+		return VirtualFS{}, nil, fmt.Errorf("load ps2 emulator files: %w", loadErr)
+	}
+	if coreEmu != launchEmu {
+		if err := overlayPS2EmulatorCore(emuFiles, emuDir, emuSets, coreEmu); err != nil {
+			return VirtualFS{}, nil, fmt.Errorf("load ps2 emulator core (%s): %w", coreEmu, err)
+		}
 	}
 	for k, v := range emuFiles {
-		files[k] = v
+		project.PutData(k, v)
+	}
+	patchID := ps2PatchID(titleID)
+	retailLauncher := ps2ProfileUsesRetailLauncher(titleID)
+	if allEmuFiles, err := LoadEmulatorDirectoryFiles(emuDir, emuSet); err == nil {
+		for k, v := range allEmuFiles {
+			if shouldSkipPS2EmulatorSidecar(k, retailLauncher) {
+				continue
+			}
+			if _, exists := project.Mem[k]; !exists {
+				project.PutData(k, v)
+			}
+		}
+	}
+	ensurePS2LauncherSidecars(project, emuDir, emuSet, launchEmu)
+	if len(project.Mem["package-ps4.conf"]) == 0 {
+		project.PutData("package-ps4.conf", []byte(PS2CompatPackageConf()))
 	}
 
-	// Lua include files
+	// Memory card: prefer user file, then emulator dump (retail), then blank.
+	if len(project.Mem["formatted.card"]) == 0 {
+		if opts.MemoryCardPath != "" {
+			data, err := os.ReadFile(opts.MemoryCardPath)
+			if err == nil {
+				project.PutData("formatted.card", data)
+			}
+		}
+	}
+	if len(project.Mem["formatted.card"]) == 0 && !retailLauncher {
+		project.PutData("formatted.card", GenerateBlankMemoryCard())
+	}
+
+	// Lua include files — fill gaps only; per-emulator lua_include wins when present.
 	cacheDir, _ := AssetsCacheDir()
 	for k, v := range GetLuaIncludeData(cacheDir) {
-		files[k] = v
+		if _, exists := project.Mem[k]; !exists {
+			project.PutData(k, v)
+		}
 	}
 
 	// Emulator config
 	if opts.ConfigTXT != "" {
-		files["config-emu-ps4.txt"] = []byte(opts.ConfigTXT)
+		project.PutData("config-emu-ps4.txt", []byte(opts.ConfigTXT))
 	} else {
-		files["config-emu-ps4.txt"] = []byte(GeneratePS2EmuConfig(opts))
+		template := string(project.Mem["config-emu-ps4.txt"])
+		project.PutData("config-emu-ps4.txt", []byte(ps2RuntimeEmuConfig(opts, titleID, len(opts.ISOPaths), template)))
 	}
 
-	// Lua config
+	// Lua config (custom or built-in compatibility script).
 	if opts.ConfigLUA != "" {
-		normalizedID := strings.ReplaceAll(titleID, "-", "_")
-		files[fmt.Sprintf("feature_data/%s_features.lua", normalizedID)] = []byte(opts.ConfigLUA)
+		project.PutData(fmt.Sprintf("feature_data/%s_features.lua", patchID), []byte(opts.ConfigLUA))
+	} else if lua, ok := PS2CompatFeatureLUA(patchID); ok {
+		project.PutData(fmt.Sprintf("feature_data/%s_features.lua", patchID), []byte(lua))
 	}
 
-	// Widescreen patch
+	// Per-game cli.conf patch (custom or built-in database entry).
 	if opts.WidescreenPatch != "" {
-		normalizedID := strings.ReplaceAll(titleID, "-", "_")
-		files[fmt.Sprintf("patches/%s_cli.conf", normalizedID)] = []byte(opts.WidescreenPatch)
+		project.PutData(fmt.Sprintf("patches/%s_cli.conf", patchID), []byte(opts.WidescreenPatch))
+	} else if cli, ok := PS2CompatCLI(patchID); ok {
+		project.PutData(fmt.Sprintf("patches/%s_cli.conf", patchID), []byte(cli))
 	}
 
-	// Disc images
+	// Disc images are staged on disk and streamed into the PFS to avoid
+	// loading multi-gigabyte ISOs into memory.
 	tmpDir := filepath.Join(os.TempDir(), "pkg-forge-ps2")
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return VirtualFS{}, nil, fmt.Errorf("create temp dir: %w", err)
+	}
 	for i, isoPath := range opts.ISOPaths {
 		discNum := i + 1
 		if opts.OnProgress != nil {
-			opts.OnProgress(30+float64(i)*5, fmt.Sprintf("Reading Disc %d image", discNum))
+			opts.OnProgress(30+float64(i)*5, fmt.Sprintf("Staging Disc %d image", discNum))
 		}
-		discData, needsLIMG, sectorSize, err := loadPS2DiscImage(isoPath, discNum, tmpDir)
+		stagedPath, err := stagePS2DiscImage(isoPath, discNum, tmpDir)
 		if err != nil {
-			return nil, nil, fmt.Errorf("read disc %d (%s): %w", discNum, isoPath, err)
+			return VirtualFS{}, nil, fmt.Errorf("stage disc %d (%s): %w", discNum, isoPath, err)
 		}
-
-		discName := fmt.Sprintf("image/disc%02d.iso", discNum)
-
-		if needsLIMG {
-			// Calculate total sectors and prepend LIMG
-			totalSectors := uint32(len(discData) / sectorSize)
-			limg := GenerateLIMG(totalSectors)
-			combined := append(limg, discData...)
-			files[discName] = combined
-		} else {
-			files[discName] = discData
-		}
+		project.PutFile(fmt.Sprintf("image/disc%02d.iso", discNum), stagedPath)
 	}
 
 	// Disc swap config for multi-disc
 	if len(opts.ISOPaths) > 1 {
-		files["disc-swap-cli.conf"] = []byte(GenerateDiscSwapConfig(len(opts.ISOPaths)))
+		project.PutData("disc-swap-cli.conf", []byte(GenerateDiscSwapConfig(len(opts.ISOPaths))))
 	}
 
 	if opts.OnProgress != nil {
 		opts.OnProgress(60, "Project files ready")
 	}
-	return files, discInfo, nil
+	return project, discInfo, nil
+}
+
+func ensurePS2LauncherSidecars(project VirtualFS, emuDir string, emuSet *EmulatorSet, launchEmu PS2EmulatorType) {
+	if len(project.Mem["sce_sys/shareparam.json"]) > 0 {
+		return
+	}
+	candidates := []string{emuSet.Name}
+	if launchEmu == EmuSiren {
+		candidates = append(candidates, DefaultPS2EmulatorSets()[EmuJakV2].Name)
+	}
+	for _, name := range candidates {
+		path := filepath.Join(emuDir, name, "sce_sys/shareparam.json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		project.PutData("sce_sys/shareparam.json", data)
+		return
+	}
 }
 
 func companionCuePath(binPath string) (string, error) {
@@ -409,6 +460,125 @@ func companionCuePath(binPath string) (string, error) {
 	}
 
 	return "", fmt.Errorf(".bin file without matching .cue; please provide the .cue file instead")
+}
+
+func stagePS2DiscImage(path string, discNum int, tmpDir string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".iso":
+		needsLIMG, sectorSize, err := isCDBasedImageFile(path)
+		if err != nil {
+			return "", err
+		}
+		if !needsLIMG {
+			return path, nil
+		}
+		return writeLIMGPrependedImage(path, discNum, tmpDir, sectorSize)
+	case ".cue":
+		tracks, err := ParseCUE(path)
+		if err != nil {
+			return "", err
+		}
+		return stageCUEImage(tracks, discNum, tmpDir)
+	case ".bin":
+		if cuePath, err := companionCuePath(path); err == nil {
+			tracks, err := ParseCUE(cuePath)
+			if err != nil {
+				return "", err
+			}
+			return stageCUEImage(tracks, discNum, tmpDir)
+		}
+		return writeLIMGPrependedImage(path, discNum, tmpDir, 2352)
+	default:
+		return "", fmt.Errorf("unsupported file extension: %s", ext)
+	}
+}
+
+func stageCUEImage(tracks []CueTrack, discNum int, tmpDir string) (string, error) {
+	binFiles := getUniqueBinFiles(tracks)
+	if len(binFiles) == 0 {
+		return "", fmt.Errorf("cue has no bin files")
+	}
+
+	var imagePath string
+	if len(binFiles) == 1 {
+		imagePath = binFiles[0]
+	} else {
+		if err := os.MkdirAll(tmpDir, 0755); err != nil {
+			return "", err
+		}
+		imagePath = filepath.Join(tmpDir, fmt.Sprintf("disc%02d.bin", discNum))
+		if _, err := MergeBins(tracks, imagePath); err != nil {
+			return "", err
+		}
+	}
+
+	return writeLIMGPrependedImage(imagePath, discNum, tmpDir, 2352)
+}
+
+func writeLIMGPrependedImage(srcPath string, discNum int, tmpDir string, sectorSize int) (string, error) {
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		return "", err
+	}
+	if sectorSize <= 0 {
+		sectorSize = 2048
+	}
+	if info.Size()%int64(sectorSize) != 0 {
+		return "", fmt.Errorf("disc image size %d is not aligned to sector size %d", info.Size(), sectorSize)
+	}
+
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return "", err
+	}
+	outPath := filepath.Join(tmpDir, fmt.Sprintf("disc%02d-limg.iso", discNum))
+	out, err := os.Create(outPath)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	totalSectors := uint32(info.Size() / int64(sectorSize))
+	if _, err := out.Write(GenerateLIMG(totalSectors)); err != nil {
+		return "", err
+	}
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+	if _, err := io.Copy(out, src); err != nil {
+		return "", err
+	}
+	return outPath, nil
+}
+
+func isCDBasedImageFile(path string) (bool, int, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".bin" || ext == ".cue" {
+		return true, 2352, nil
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, 2048, err
+	}
+	if info.Size() >= 700*1024*1024 {
+		return false, 2048, nil
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return false, 2048, err
+	}
+	defer f.Close()
+
+	head := make([]byte, 2048)
+	if _, err := f.ReadAt(head, 0); err != nil {
+		return false, 2048, err
+	}
+	return isCDBasedImage(path, head), 2048, nil
 }
 
 func loadPS2DiscImage(path string, discNum int, tmpDir string) ([]byte, bool, int, error) {
@@ -539,7 +709,7 @@ func CreatePS2FPKG(opts PS2FPKGOptions) error {
 	if opts.OnProgress != nil {
 		opts.OnProgress(0, "Preparing PS2 package")
 	}
-	files, discInfo, err := BuildPS2Project(opts)
+	project, discInfo, err := BuildPS2Project(opts)
 	if err != nil {
 		return err
 	}
@@ -568,10 +738,10 @@ func CreatePS2FPKG(opts PS2FPKGOptions) error {
 
 	// Build the fPKG using the generic PKG builder
 	pkgOpts := PKGOptions{
-		Files:     files,
-		Title:     title,
-		TitleID:   normalizeTitleID(titleID),
-		ContentID: contentID,
+		Project: project,
+		Title:   title,
+		TitleID:     normalizeTitleID(titleID),
+		ContentID:   contentID,
 		OnProgress: func(percent float64, phase string) {
 			if opts.OnProgress != nil {
 				opts.OnProgress(65+percent*0.3, phase)
@@ -579,17 +749,8 @@ func CreatePS2FPKG(opts PS2FPKGOptions) error {
 		},
 	}
 
-	pkgData, err := BuildFPKG(pkgOpts)
-	if err != nil {
+	if err := BuildFPKGToFile(opts.OutputPath, pkgOpts); err != nil {
 		return fmt.Errorf("build fpkg: %w", err)
-	}
-
-	// Write output file
-	if opts.OnProgress != nil {
-		opts.OnProgress(97, "Writing package")
-	}
-	if err := os.WriteFile(opts.OutputPath, pkgData, 0644); err != nil {
-		return fmt.Errorf("write pkg: %w", err)
 	}
 	if opts.OnProgress != nil {
 		opts.OnProgress(100, "Complete")

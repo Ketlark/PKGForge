@@ -44,7 +44,11 @@ import (
 // compressPFSCBlock tries to compress a 64 KiB block with windowBits=12.
 // Returns the compressed data (zlib format) or nil if compression didn't help.
 func compressPFSCBlock(block []byte) []byte {
-	if len(block) == 0 {
+	return compressPFSCBlockWithSkip(block, false)
+}
+
+func compressPFSCBlockWithSkip(block []byte, skip bool) []byte {
+	if len(block) == 0 || skip {
 		return nil
 	}
 	// Output buffer: worst case zlib overhead is ~0.1% + 11 bytes

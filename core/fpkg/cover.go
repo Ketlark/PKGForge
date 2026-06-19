@@ -36,7 +36,7 @@ func ResolvePS1Cover(cuePath, titleID string) (string, error) {
 		return cachePath, nil
 	}
 
-	for _, local := range localPS1CoverCandidates(cuePath) {
+	for _, local := range localDiscCoverCandidates(cuePath) {
 		if _, err := os.Stat(local); err == nil {
 			if err := convertCoverToPNGFile(local, cachePath); err != nil {
 				return "", err
@@ -82,7 +82,7 @@ func ResolvePS1Background(cuePath, titleID string) (string, error) {
 	}
 
 	var lastErr error
-	for _, local := range localPS1BackgroundCandidates(cuePath) {
+	for _, local := range localDiscBackgroundCandidates(cuePath) {
 		if _, err := os.Stat(local); err != nil {
 			continue
 		}
@@ -98,11 +98,90 @@ func ResolvePS1Background(cuePath, titleID string) (string, error) {
 	return "", fmt.Errorf("ps1 background: no local background found for %s", serial)
 }
 
-func localPS1CoverCandidates(cuePath string) []string {
-	if cuePath == "" {
+// ResolvePS2Cover finds or downloads a PS2 cover and returns a cached 512x512 PNG.
+// It is best-effort: callers should keep building with default artwork when it
+// returns an error.
+func ResolvePS2Cover(discPath, titleID string) (string, error) {
+	serial := formatGameSerial(titleID)
+	if serial == "" {
+		return "", fmt.Errorf("ps2 cover: missing title id")
+	}
+
+	cachePath, err := ps1CoverCachePath(serial)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(cachePath); err == nil {
+		return cachePath, nil
+	}
+
+	for _, local := range localDiscCoverCandidates(discPath) {
+		if _, err := os.Stat(local); err == nil {
+			if err := convertCoverToPNGFile(local, cachePath); err != nil {
+				return "", err
+			}
+			return cachePath, nil
+		}
+	}
+
+	var lastErr error
+	for _, url := range ps2CoverURLCandidates(serial) {
+		data, err := downloadCover(url)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := convertCoverBytesToPNGFile(data, cachePath); err != nil {
+			lastErr = err
+			continue
+		}
+		return cachePath, nil
+	}
+	if lastErr != nil {
+		return "", lastErr
+	}
+	return "", fmt.Errorf("ps2 cover: no cover found for %s", serial)
+}
+
+// ResolvePS2Background finds a disc-adjacent launch background and returns a
+// cached 1920x1080 PNG. Remote background art is not required for package
+// creation; callers should keep building with bundled/default artwork.
+func ResolvePS2Background(discPath, titleID string) (string, error) {
+	serial := formatGameSerial(titleID)
+	if serial == "" {
+		return "", fmt.Errorf("ps2 background: missing title id")
+	}
+
+	cachePath, err := ps1BackgroundCachePath(serial)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(cachePath); err == nil {
+		return cachePath, nil
+	}
+
+	var lastErr error
+	for _, local := range localDiscBackgroundCandidates(discPath) {
+		if _, err := os.Stat(local); err != nil {
+			continue
+		}
+		if err := convertBackgroundToPNGFile(local, cachePath); err != nil {
+			lastErr = err
+			continue
+		}
+		return cachePath, nil
+	}
+	if lastErr != nil {
+		return "", lastErr
+	}
+	return "", fmt.Errorf("ps2 background: no local background found for %s", serial)
+}
+
+func localDiscCoverCandidates(discPath string) []string {
+	if discPath == "" {
 		return nil
 	}
-	base := strings.TrimSuffix(cuePath, filepath.Ext(cuePath))
+	base := strings.TrimSuffix(discPath, filepath.Ext(discPath))
 	return []string{
 		base + "_cover.png",
 		base + "_cover.jpg",
@@ -113,12 +192,12 @@ func localPS1CoverCandidates(cuePath string) []string {
 	}
 }
 
-func localPS1BackgroundCandidates(cuePath string) []string {
-	if cuePath == "" {
+func localDiscBackgroundCandidates(discPath string) []string {
+	if discPath == "" {
 		return nil
 	}
-	dir := filepath.Dir(cuePath)
-	base := strings.TrimSuffix(cuePath, filepath.Ext(cuePath))
+	dir := filepath.Dir(discPath)
+	base := strings.TrimSuffix(discPath, filepath.Ext(discPath))
 	return []string{
 		base + "_background.png",
 		base + "_background.jpg",
@@ -161,6 +240,13 @@ func ps1BackgroundCachePath(serial string) (string, error) {
 		return "", fmt.Errorf("ps1 background cache mkdir: %w", err)
 	}
 	return filepath.Join(dir, serial+".png"), nil
+}
+
+func ps2CoverURLCandidates(serial string) []string {
+	return []string{
+		"https://raw.githubusercontent.com/xlenore/ps2-covers/main/covers/default/" + serial + ".jpg",
+		"https://raw.githubusercontent.com/xlenore/ps2-covers/main/covers/3d/" + serial + ".png",
+	}
 }
 
 func ps1CoverURLCandidates(serial, title string) []string {
@@ -224,6 +310,10 @@ func psxDataCenterRegions(serial string) []string {
 }
 
 func formatPSXSerial(titleID string) string {
+	return formatGameSerial(titleID)
+}
+
+func formatGameSerial(titleID string) string {
 	normalized := normalizeGameID(titleID)
 	if normalized == "" {
 		return ""
